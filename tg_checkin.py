@@ -174,24 +174,67 @@ def message_text(message: Any) -> str:
     return " ".join(str(text).split())
 
 
-def extract_points(*texts: str) -> Optional[float]:
-    """Extract the current check-in reward from bot response text."""
-    preferred = re.compile(
-        r"(?:本次|此次|今日|获得|奖励|增加|赠送|领取|加)[^\d+\-]{0,16}"
-        r"([+\-]?\d+(?:\.\d+)?)\s*(?:积分|分|points?)",
-        re.IGNORECASE,
+def extract_reward(*texts: str) -> Optional[Dict[str, Any]]:
+    """Extract this check-in's reward amount and unit from bot responses."""
+    number = r"(?P<amount>[+\-]?\d+(?:\.\d+)?)"
+    unit = r"(?P<unit>[^\W\d_][\w-]{0,23})"
+    preferred = (
+        re.compile(
+            r"(?:本次|此次|今日)?\s*(?:获得奖励|获得|奖励|增加|赠送|领取|加)"
+            r"[^\d]{0,24}?" + number + r"\s*" + unit,
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"签到成功\s*(?:[|:：，,·]\s*)*" + number + r"\s*" + unit,
+            re.IGNORECASE,
+        ),
     )
-    fallback = re.compile(
-        r"([+\-]?\d+(?:\.\d+)?)\s*(?:积分|分|points?)|"
-        r"(?<!前)(?<!累计)(?:积分|points?)\s*[:：]?\s*([+\-]?\d+(?:\.\d+)?)",
+    point_fallback = (
+        re.compile(number + r"\s*(?P<point_unit>积分|分|points?)", re.IGNORECASE),
+        re.compile(
+            r"(?<!前)(?<!累计)(?P<point_unit>积分|points?)\s*[:：]?\s*" + number,
+            re.IGNORECASE,
+        ),
+    )
+    values = [" ".join(str(text or "").split()) for text in texts]
+    for patterns in (preferred, point_fallback):
+        for value in values:
+            for pattern in patterns:
+                match = pattern.search(value)
+                if match:
+                    amount = float(match.group("amount"))
+                    unit_value = match.groupdict().get("unit") or match.group("point_unit")
+                    return {
+                        "amount": int(amount) if amount.is_integer() else amount,
+                        "unit": unit_value,
+                    }
+    return None
+
+
+def extract_points(*texts: str) -> Optional[float]:
+    """Return legacy point rewards for callers using the old numeric field."""
+    reward = extract_reward(*texts)
+    if not reward or str(reward["unit"]).casefold() not in {"积分", "分", "point", "points"}:
+        return None
+    return reward["amount"]
+
+
+def extract_balance(*texts: str) -> Optional[Dict[str, Any]]:
+    """Extract the account balance reported after a successful check-in."""
+    pattern = re.compile(
+        r"(?:当前持有|当前余额|现有余额|账户余额|余额)"
+        r"[^\d]{0,24}?(?P<amount>[+\-]?\d+(?:\.\d+)?)\s*"
+        r"(?P<unit>[^\W\d_][\w-]{0,23})",
         re.IGNORECASE,
     )
     for text in texts:
-        value = " ".join(str(text or "").split())
-        match = preferred.search(value) or fallback.search(value)
+        match = pattern.search(" ".join(str(text or "").split()))
         if match:
-            number = float(match.group(1) or match.group(2))
-            return int(number) if number.is_integer() else number
+            amount = float(match.group("amount"))
+            return {
+                "amount": int(amount) if amount.is_integer() else amount,
+                "unit": match.group("unit"),
+            }
     return None
 
 
@@ -273,7 +316,12 @@ async def run_task(client: TelegramClient, task: BotTask) -> Dict[str, Any]:
                     response_texts.append(message_text(follow_up))
                     LOGGER.info("[%s] follow-up: %s", task.bot, message_text(follow_up)[:500])
 
-        return {"points": extract_points(*response_texts), "texts": response_texts}
+        reward = extract_reward(*response_texts)
+        balance = extract_balance(*response_texts)
+        points = None
+        if reward and str(reward["unit"]).casefold() in {"积分", "分", "point", "points"}:
+            points = reward["amount"]
+        return {"reward": reward, "balance": balance, "points": points, "texts": response_texts}
 
 
 async def run(config_path: Path, dry_run: bool = False) -> int:

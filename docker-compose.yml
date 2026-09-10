@@ -24,8 +24,10 @@ services:
       NODESEEK_IMPERSONATE: ${NODESEEK_IMPERSONATE:-chrome136}
       WEB_HOST: 0.0.0.0
       WEB_PORT: 8080
+      WEB_ADMIN_USER: ${WEB_ADMIN_USER:-admin}
+      WEB_ADMIN_PASSWORD: ${WEB_ADMIN_PASSWORD:-}
     ports:
-      - "8080:8080"
+      - "${WEB_BIND_ADDRESS:-0.0.0.0}:8080:8080"
     volumes:
       - ./data:/app/data
       - ./web:/app/web:ro

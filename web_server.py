@@ -8,6 +8,8 @@ import logging
 import os
 import random
 import re
+import secrets
+import binascii
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
@@ -22,8 +24,8 @@ from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request as WebRequest
+from fastapi.responses import FileResponse, JSONResponse
 from telethon import TelegramClient
 from telethon.errors import FloodWaitError, RPCError
 
@@ -79,13 +81,25 @@ MIHOMO_HEALTHCHECK_EXPECTED_STATUS = (
     or "200-399"
 )
 WEB_DIR = ROOT / "web"
+WEB_ADMIN_USER = os.getenv("WEB_ADMIN_USER", "admin")
+WEB_ADMIN_PASSWORD = os.getenv("WEB_ADMIN_PASSWORD", "")
+AUTH_INPUT_TIMEOUT = 300
 SCHEDULE_TIMEZONE_NAME = os.getenv("TG_SCHEDULE_TIMEZONE", "Asia/Shanghai").strip()
 SCHEDULE_TIMEZONE = ZoneInfo(SCHEDULE_TIMEZONE_NAME)
-SCHEDULE_WINDOW_MINUTES = 20
+TG_SCHEDULE_WINDOW_START = datetime_time(0, 0)
+TG_SCHEDULE_WINDOW_END = datetime_time(0, 10)
+TG_SCHEDULE_WINDOW_LABEL = "00:00-00:10"
+WEBSITE_SCHEDULE_WINDOW_START = datetime_time(10, 0)
+WEBSITE_SCHEDULE_WINDOW_END = datetime_time(13, 0)
+WEBSITE_SCHEDULE_WINDOW_LABEL = "10:00-13:00"
 NODESEEK_BASE_URL = "https://www.nodeseek.com"
 NODESEEK_LOGIN_URL = NODESEEK_BASE_URL + "/signIn.html"
-NODESEEK_CHECKIN_URL = NODESEEK_BASE_URL + "/api/attendance?random=false"
-NODESEEK_RANDOM_CHECKIN_URL = NODESEEK_BASE_URL + "/api/attendance?random=true"
+NODESEEK_CHECKIN_BASE_URL = NODESEEK_BASE_URL + "/api/attendance"
+NODESEEK_CHECKIN_URL = NODESEEK_CHECKIN_BASE_URL + "?random=false"
+NODESEEK_REWARD_MODES = {
+    "fixed": {"label": "固定 5 个鸡腿", "random": False},
+    "random": {"label": "随机鸡腿", "random": True},
+}
 NODESEEK_IMPERSONATE = os.getenv("NODESEEK_IMPERSONATE", "chrome136").strip() or "chrome136"
 NODESEEK_HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -102,6 +116,19 @@ NODESEEK_HEADERS = {
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def normalize_reward_mode(value: Any) -> str:
+    mode = str(value or "fixed").strip().lower()
+    if mode not in NODESEEK_REWARD_MODES:
+        raise RuntimeError("收益模式必须是 fixed 或 random")
+    return mode
+
+
+def checkin_url_for_reward_mode(mode: Any) -> str:
+    normalized = normalize_reward_mode(mode)
+    random_value = "true" if NODESEEK_REWARD_MODES[normalized]["random"] else "false"
+    return "{}?random={}".format(NODESEEK_CHECKIN_BASE_URL, random_value)
 
 
 class MemoryLogHandler(logging.Handler):
@@ -127,13 +154,11 @@ state: Dict[str, Any] = {
 }
 run_lock = asyncio.Lock()
 website_run_lock = asyncio.Lock()
-website_login_lock = asyncio.Lock()
 profile_lock = asyncio.Lock()
 run_task_handle: asyncio.Task = None
 scheduler_task: Optional[asyncio.Task] = None
 auth_future: Optional[asyncio.Future] = None
 website_run_task_handle: Optional[asyncio.Task] = None
-website_login_task_handle: Optional[asyncio.Task] = None
 website_scheduler_task: Optional[asyncio.Task] = None
 bot_profile_cache: Dict[str, Dict[str, Any]] = {}
 
@@ -189,17 +214,13 @@ def write_bot_history() -> None:
 bot_history = load_bot_history()
 
 
-def nodeseek_checkin_url(random_checkin: bool) -> str:
-    return NODESEEK_RANDOM_CHECKIN_URL if random_checkin else NODESEEK_CHECKIN_URL
-
-
 def load_website_settings() -> Dict[str, Any]:
     defaults: Dict[str, Any] = {
         "name": "NodeSeek 签到",
         "enabled": False,
         "login_url": NODESEEK_LOGIN_URL,
         "checkin_url": NODESEEK_CHECKIN_URL,
-        "random_checkin": False,
+        "reward_mode": "fixed",
         "method": "POST",
         "cookie": "",
         "headers": NODESEEK_HEADERS.copy(),
@@ -207,7 +228,6 @@ def load_website_settings() -> Dict[str, Any]:
         "timeout": 25,
         "success_keyword": "",
         "schedule_enabled": False,
-        "schedule_time": "08:00",
         "updated_at": None,
     }
     try:
@@ -220,22 +240,17 @@ def load_website_settings() -> Dict[str, Any]:
     # generic website fields to override the built-in NodeSeek protocol.
     defaults["enabled"] = data.get("enabled") if isinstance(data.get("enabled"), bool) else False
     defaults["cookie"] = data.get("cookie") if isinstance(data.get("cookie"), str) else ""
-    defaults["random_checkin"] = (
-        data.get("random_checkin")
-        if isinstance(data.get("random_checkin"), bool)
-        else False
-    )
-    defaults["checkin_url"] = nodeseek_checkin_url(defaults["random_checkin"])
+    persisted_mode = data.get("reward_mode")
+    if not isinstance(persisted_mode, str) or persisted_mode not in NODESEEK_REWARD_MODES:
+        # Migrate the previous fixed URL representation if it was changed by
+        # an earlier version or edited directly on the server.
+        persisted_mode = "random" if "random=true" in str(data.get("checkin_url", "")) else "fixed"
+    defaults["reward_mode"] = persisted_mode
+    defaults["checkin_url"] = checkin_url_for_reward_mode(persisted_mode)
     defaults["schedule_enabled"] = (
         data.get("schedule_enabled")
         if isinstance(data.get("schedule_enabled"), bool)
         else False
-    )
-    defaults["schedule_time"] = (
-        data.get("schedule_time")
-        if isinstance(data.get("schedule_time"), str)
-        and re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", data.get("schedule_time"))
-        else "08:00"
     )
     defaults["updated_at"] = data.get("updated_at") if isinstance(data.get("updated_at"), str) else None
     return defaults
@@ -288,15 +303,6 @@ website_runtime: Dict[str, Any] = {
     "trigger": None,
     "next_scheduled_at": None,
 }
-website_login_runtime: Dict[str, Any] = {
-    "running": False,
-    "started_at": None,
-    "finished_at": None,
-    "status": "idle",
-    "message": "",
-    "cookie_configured": False,
-}
-website_login_runtime["cookie_configured"] = bool(str(website_settings.get("cookie", "")).strip())
 
 
 def load_proxy_state() -> Dict[str, Any]:
@@ -406,7 +412,9 @@ def write_website_settings(payload: Dict[str, Any]) -> None:
     elif incoming_cookie is None or (isinstance(incoming_cookie, str) and not incoming_cookie.strip()):
         cookie = str(current.get("cookie", ""))
     else:
-        cookie = str(incoming_cookie).strip()
+        if not isinstance(incoming_cookie, str):
+            raise RuntimeError("Cookie 必须是字符串")
+        cookie = incoming_cookie.strip()
     if len(cookie) > 16384 or "\r" in cookie or "\n" in cookie:
         raise RuntimeError("Cookie 格式无效或长度过长")
 
@@ -414,19 +422,15 @@ def write_website_settings(payload: Dict[str, Any]) -> None:
     schedule_enabled = payload.get("schedule_enabled", current.get("schedule_enabled", False))
     if not isinstance(enabled, bool) or not isinstance(schedule_enabled, bool):
         raise RuntimeError("启用选项必须是布尔值")
-    random_checkin = payload.get("random_checkin", current.get("random_checkin", False))
-    if not isinstance(random_checkin, bool):
-        raise RuntimeError("签到模式必须是布尔值")
-    schedule_time = str(payload.get("schedule_time", current.get("schedule_time", "08:00"))).strip()
-    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", schedule_time):
-        raise RuntimeError("自动签到时间必须是 HH:MM 格式")
+    reward_mode = normalize_reward_mode(payload.get("reward_mode", current.get("reward_mode", "fixed")))
+    checkin_url = checkin_url_for_reward_mode(reward_mode)
 
-    website_settings = {
+    new_settings = {
         "name": "NodeSeek 签到",
         "enabled": enabled,
         "login_url": NODESEEK_LOGIN_URL,
-        "checkin_url": nodeseek_checkin_url(random_checkin),
-        "random_checkin": random_checkin,
+        "checkin_url": checkin_url,
+        "reward_mode": reward_mode,
         "method": "POST",
         "cookie": cookie,
         "headers": NODESEEK_HEADERS.copy(),
@@ -434,19 +438,18 @@ def write_website_settings(payload: Dict[str, Any]) -> None:
         "timeout": 25,
         "success_keyword": "",
         "schedule_enabled": schedule_enabled,
-        "schedule_time": schedule_time,
         "updated_at": now_iso(),
     }
     WEBSITE_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     temp_path = WEBSITE_SETTINGS_PATH.with_suffix(WEBSITE_SETTINGS_PATH.suffix + ".tmp")
-    temp_path.write_text(json.dumps(website_settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.chmod(temp_path, 0o600)
+    fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        stream.write(json.dumps(new_settings, ensure_ascii=False, indent=2) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
     os.replace(temp_path, WEBSITE_SETTINGS_PATH)
-
-
-def write_website_cookie(cookie: str) -> None:
-    write_website_settings({"cookie": cookie})
-
+    website_settings = new_settings
 
 
 def decode_website_body(raw: bytes, headers: Any = None) -> str:
@@ -467,7 +470,7 @@ def perform_website_request(settings: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError("未配置 NodeSeek Cookie")
     headers = NODESEEK_HEADERS.copy()
     headers["Cookie"] = cookie
-    checkin_url = str(settings.get("checkin_url") or NODESEEK_CHECKIN_URL)
+    checkin_url = checkin_url_for_reward_mode(settings.get("reward_mode", "fixed"))
     try:
         response = curl_requests.post(
             checkin_url,
@@ -494,48 +497,6 @@ def perform_website_request(settings: Dict[str, Any]) -> Dict[str, Any]:
         "success": success or already,
         "already": already,
     }
-
-
-def _redact_login_error(message: Any, password: str) -> str:
-    text = str(message or "登录失败")[:300]
-    return text.replace(password, "[已隐藏]") if password else text
-
-
-def perform_nodeseek_login(username: str, password: str) -> str:
-    if curl_requests is None:
-        raise RuntimeError("NodeSeek 登录需要 curl_cffi 依赖")
-    session = curl_requests.Session(impersonate=NODESEEK_IMPERSONATE)
-    try:
-        session.get(NODESEEK_LOGIN_URL, headers=NODESEEK_HEADERS, timeout=25)
-        login_headers = NODESEEK_HEADERS.copy()
-        login_headers.update({
-            "Referer": NODESEEK_LOGIN_URL,
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-dest": "empty",
-        })
-        response = session.post(
-            NODESEEK_BASE_URL + "/api/account/signIn",
-            json={"username": username, "password": password},
-            headers=login_headers,
-            timeout=25,
-        )
-        try:
-            data = response.json()
-        except ValueError:
-            data = {}
-        if not isinstance(data, dict) or not data.get("success"):
-            message = data.get("message") if isinstance(data, dict) else response.text
-            raise RuntimeError(_redact_login_error(message, password))
-        cookies = session.cookies.get_dict()
-        cookie = "; ".join("{}={}".format(name, value) for name, value in cookies.items())
-        if not cookie:
-            raise RuntimeError("登录成功但未获取到 Cookie")
-        return cookie
-    except Exception as exc:
-        raise RuntimeError(_redact_login_error(exc, password)) from None
-    finally:
-        session.close()
 
 
 def mihomo_config() -> Dict[str, Any]:
@@ -638,6 +599,24 @@ except OSError as exc:
 app = FastAPI(title="Telegram Check-in Console", docs_url=None, redoc_url=None)
 
 
+@app.middleware("http")
+async def admin_auth(request: WebRequest, call_next):
+    """Optional browser-native authentication; health checks expose no user data."""
+    if WEB_ADMIN_PASSWORD and request.url.path != "/healthz":
+        valid = False
+        try:
+            scheme, token = request.headers.get("authorization", "").split(" ", 1)
+            if scheme.lower() == "basic":
+                user, password = base64.b64decode(token, validate=True).decode("utf-8").split(":", 1)
+                valid = secrets.compare_digest(user.encode(), WEB_ADMIN_USER.encode()) & secrets.compare_digest(password.encode(), WEB_ADMIN_PASSWORD.encode())
+        except (ValueError, UnicodeError, binascii.Error):
+            pass
+        if not valid:
+            return JSONResponse({"detail": "需要管理端认证"}, status_code=401,
+                                headers={"WWW-Authenticate": 'Basic realm="tgauto", charset="UTF-8"'})
+    return await call_next(request)
+
+
 def read_config() -> List[Dict[str, Any]]:
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -711,7 +690,9 @@ async def wait_for_auth_input(stage: str, message: str) -> str:
     state["auth_required"] = stage
     state["auth_message"] = message
     try:
-        return await future
+        return await asyncio.wait_for(future, timeout=AUTH_INPUT_TIMEOUT)
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError("登录验证等待超时，请重新开始签到") from exc
     finally:
         if auth_future is future:
             auth_future = None
@@ -884,14 +865,17 @@ async def get_website_settings() -> Dict[str, Any]:
         "name": "NodeSeek 签到",
         "enabled": bool(website_settings.get("enabled")),
         "login_url": NODESEEK_LOGIN_URL,
-        "checkin_url": website_settings.get("checkin_url", NODESEEK_CHECKIN_URL),
-        "random_checkin": bool(website_settings.get("random_checkin", False)),
+        "checkin_url": checkin_url_for_reward_mode(website_settings.get("reward_mode", "fixed")),
         "method": "POST",
+        "reward_mode": website_settings.get("reward_mode", "fixed"),
+        "reward_mode_label": NODESEEK_REWARD_MODES[website_settings.get("reward_mode", "fixed")]["label"],
+        "reward_modes": {
+            key: value["label"] for key, value in NODESEEK_REWARD_MODES.items()
+        },
         "cookie_configured": bool(str(website_settings.get("cookie", "")).strip()),
         "schedule_enabled": bool(website_settings.get("schedule_enabled")),
-        "schedule_time": website_settings.get("schedule_time", "08:00"),
+        "schedule_window": WEBSITE_SCHEDULE_WINDOW_LABEL,
         "updated_at": website_settings.get("updated_at"),
-        "login_runtime": website_login_runtime.copy(),
     }
 
 
@@ -901,7 +885,6 @@ async def update_website_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
         write_website_settings(payload)
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    website_login_runtime["cookie_configured"] = bool(website_settings.get("cookie"))
     LOGGER.info("NodeSeek 签到配置已保存")
     return {"ok": True, "cookie_configured": bool(website_settings.get("cookie"))}
 
@@ -913,35 +896,21 @@ async def get_website_status() -> Dict[str, Any]:
         "enabled": bool(website_settings.get("enabled")),
         "configured": True,
         "login_url": NODESEEK_LOGIN_URL,
-        "checkin_url": website_settings.get("checkin_url", NODESEEK_CHECKIN_URL),
-        "random_checkin": bool(website_settings.get("random_checkin", False)),
+        "checkin_url": checkin_url_for_reward_mode(website_settings.get("reward_mode", "fixed")),
         "method": "POST",
+        "reward_mode": website_settings.get("reward_mode", "fixed"),
+        "reward_mode_label": NODESEEK_REWARD_MODES[website_settings.get("reward_mode", "fixed")]["label"],
         "cookie_configured": bool(str(website_settings.get("cookie", "")).strip()),
-        "login_runtime": website_login_runtime.copy(),
         "runtime": website_runtime.copy(),
         "last_result": website_history.copy() if website_history else None,
         "schedule": {
             "enabled": bool(website_settings.get("schedule_enabled")),
-            "time": website_settings.get("schedule_time", "08:00"),
+            "window": WEBSITE_SCHEDULE_WINDOW_LABEL,
             "timezone": SCHEDULE_TIMEZONE_NAME,
             "last_run_date": website_schedule_state.get("last_run_date"),
             "next_run_at": website_runtime.get("next_scheduled_at"),
         },
     }
-
-
-@app.post("/api/website/login", status_code=202)
-async def start_website_login_api(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if website_login_is_active():
-        raise HTTPException(status_code=409, detail="NodeSeek 登录正在运行")
-    username = payload.get("username")
-    password = payload.get("password")
-    if not isinstance(username, str) or not username.strip() or len(username.strip()) > 256:
-        raise HTTPException(status_code=422, detail="请输入有效的 NodeSeek 用户名")
-    if not isinstance(password, str) or not password or len(password) > 4096:
-        raise HTTPException(status_code=422, detail="请输入有效的 NodeSeek 密码")
-    launch_website_login(username.strip(), password)
-    return {"ok": True, "message": "NodeSeek 登录已开始"}
 
 
 @app.post("/api/website/run", status_code=202)
@@ -951,7 +920,7 @@ async def start_website_run() -> Dict[str, Any]:
     if not website_settings.get("enabled"):
         raise HTTPException(status_code=422, detail="请先在网站设置中启用网站签到")
     if not website_settings.get("cookie"):
-        raise HTTPException(status_code=422, detail="请先登录 NodeSeek 获取 Cookie")
+        raise HTTPException(status_code=422, detail="请先配置 NodeSeek Cookie")
     launch_website_run("manual")
     return {"ok": True, "message": "网站签到已开始"}
 
@@ -1075,6 +1044,29 @@ async def refresh_proxy_subscription() -> Dict[str, Any]:
     return {"ok": True, "message": "节点刷新已触发"}
 
 
+@app.post("/api/proxy/delay")
+async def test_proxy_delay(payload: Dict[str, Any]) -> Dict[str, Any]:
+    name = str(payload.get("name") or "").strip()
+    if not name or name == "DIRECT" or len(name) > 256 or any(char in name for char in "\r\n"):
+        raise HTTPException(status_code=422, detail="节点名称无效")
+    path = (
+        f"providers/proxies/{quote(MIHOMO_PROVIDER_NAME, safe='')}/"
+        f"{quote(name, safe='')}/healthcheck"
+        f"?timeout=10000&url={quote(MIHOMO_HEALTHCHECK_URL, safe='')}"
+    )
+    try:
+        result = await mihomo_call("GET", path, timeout=12.0)
+        delay = int(result.get("delay")) if isinstance(result, dict) else 0
+        if delay <= 0:
+            raise ValueError("未返回有效延迟")
+    except (HTTPError, URLError, OSError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="节点测速失败: {}".format(getattr(exc, "reason", exc)),
+        ) from exc
+    return {"ok": True, "name": name, "delay": delay}
+
+
 @app.put("/api/proxy/select")
 async def select_proxy_node(payload: Dict[str, Any]) -> Dict[str, Any]:
     name = str(payload.get("name") or "").strip()
@@ -1110,6 +1102,14 @@ async def submit_auth(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True}
 
 
+@app.post("/api/auth/cancel")
+async def cancel_auth() -> Dict[str, Any]:
+    if auth_future is None or auth_future.done():
+        raise HTTPException(status_code=409, detail="当前没有等待中的登录验证")
+    auth_future.set_exception(RuntimeError("用户已取消登录验证"))
+    return {"ok": True}
+
+
 @app.get("/api/status")
 async def get_status() -> Dict[str, Any]:
     return {
@@ -1126,16 +1126,104 @@ async def get_status() -> Dict[str, Any]:
         "schedule": {
             "enabled": True,
             "timezone": SCHEDULE_TIMEZONE_NAME,
-            "window": "00:00-00:20",
+            "window": TG_SCHEDULE_WINDOW_LABEL,
             "next_run_at": state["next_scheduled_at"],
             "last_run_date": schedule_state.get("last_run_date"),
         },
     }
 
 
-def schedule_window(day) -> tuple[datetime, datetime]:
-    start = datetime.combine(day, datetime_time.min, tzinfo=SCHEDULE_TIMEZONE)
-    return start, start + timedelta(minutes=SCHEDULE_WINDOW_MINUTES)
+def schedule_window(
+    day,
+    window_start: datetime_time = TG_SCHEDULE_WINDOW_START,
+    window_end: datetime_time = TG_SCHEDULE_WINDOW_END,
+) -> tuple[datetime, datetime]:
+    return (
+        datetime.combine(day, window_start, tzinfo=SCHEDULE_TIMEZONE),
+        datetime.combine(day, window_end, tzinfo=SCHEDULE_TIMEZONE),
+    )
+
+
+def random_schedule_target(
+    now: datetime,
+    last_run_date: Optional[str],
+    previous_time: Optional[str] = None,
+    window_start: datetime_time = TG_SCHEDULE_WINDOW_START,
+    window_end: datetime_time = TG_SCHEDULE_WINDOW_END,
+) -> datetime:
+    """Choose the next run in the daily window and avoid repeating its prior time."""
+    today = now.date()
+    start, end = schedule_window(today, window_start, window_end)
+    if last_run_date == today.isoformat() or now >= end:
+        start, end = schedule_window(today + timedelta(days=1), window_start, window_end)
+    elif now >= start:
+        # Round up so a generated target can never be earlier than `now`.
+        start = now.replace(microsecond=0) + timedelta(seconds=1)
+        if start >= end:
+            start, end = schedule_window(today + timedelta(days=1), window_start, window_end)
+
+    available_seconds = int((end - start).total_seconds())
+    offset = random.randrange(available_seconds)
+    target = start + timedelta(seconds=offset)
+    if (
+        available_seconds > 1
+        and previous_time
+        and target.strftime("%H:%M:%S") == previous_time
+    ):
+        target = start + timedelta(seconds=(offset + 1) % available_seconds)
+    return target
+
+
+def saved_schedule_target(
+    schedule: Dict[str, Any],
+    now: datetime,
+    window_start: datetime_time = TG_SCHEDULE_WINDOW_START,
+    window_end: datetime_time = TG_SCHEDULE_WINDOW_END,
+) -> Optional[datetime]:
+    """Return an unexpired saved target when it still belongs to the active window."""
+    value = schedule.get("scheduled_at")
+    if not isinstance(value, str):
+        return None
+    try:
+        target = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if target.tzinfo is None:
+        return None
+    target = target.astimezone(SCHEDULE_TIMEZONE)
+    start, end = schedule_window(target.date(), window_start, window_end)
+    today = now.date()
+    allowed_dates = {today, today + timedelta(days=1)}
+    if (
+        target <= now
+        or schedule.get("last_run_date") == target.date().isoformat()
+        or target.date() not in allowed_dates
+        or not start <= target < end
+    ):
+        return None
+    return target
+
+
+def prepare_schedule_target(
+    schedule: Dict[str, Any],
+    now: datetime,
+    window_start: datetime_time = TG_SCHEDULE_WINDOW_START,
+    window_end: datetime_time = TG_SCHEDULE_WINDOW_END,
+) -> tuple[datetime, bool]:
+    target = saved_schedule_target(schedule, now, window_start, window_end)
+    if target is not None:
+        return target, False
+
+    target = random_schedule_target(
+        now,
+        schedule.get("last_run_date"),
+        schedule.get("last_scheduled_time"),
+        window_start,
+        window_end,
+    )
+    schedule["scheduled_at"] = target.isoformat(timespec="seconds")
+    schedule["last_scheduled_time"] = target.strftime("%H:%M:%S")
+    return target, True
 
 
 def schedule_now() -> datetime:
@@ -1169,91 +1257,79 @@ def website_run_is_active() -> bool:
     )
 
 
-def website_login_is_active() -> bool:
-    return website_login_runtime["running"] or (
-        website_login_task_handle is not None and not website_login_task_handle.done()
-    )
-
-
-def launch_website_login(username: str, password: str) -> None:
-    global website_login_task_handle
-    website_login_task_handle = asyncio.create_task(
-        execute_website_login(username, password)
-    )
-
-
 def launch_website_run(trigger: str) -> None:
     global website_run_task_handle
     website_run_task_handle = asyncio.create_task(execute_website_checkin(trigger))
 
 
-async def execute_website_login(username: str, password: str) -> None:
-    async with website_login_lock:
-        website_login_runtime.update({
-            "running": True,
-            "started_at": now_iso(),
-            "finished_at": None,
-            "status": "running",
-            "message": "正在请求 NodeSeek 登录接口",
-            "cookie_configured": False,
-        })
-        try:
-            cookie = await asyncio.to_thread(perform_nodeseek_login, username, password)
-            write_website_cookie(cookie)
-            website_login_runtime.update({
-                "status": "success",
-                "message": "NodeSeek 登录成功，Cookie 已保存",
-                "cookie_configured": True,
-            })
-        except Exception as exc:
-            website_login_runtime.update({
-                "status": "failed",
-                "message": str(exc)[:300] or "NodeSeek 登录失败",
-                "cookie_configured": bool(website_settings.get("cookie")),
-            })
-        finally:
-            website_login_runtime["running"] = False
-            website_login_runtime["finished_at"] = now_iso()
+async def wait_for_schedule_slot(target, window_end, is_active, enabled=lambda: True):
+    """Retry contention within today's window, without consuming today's attempt."""
+    end = datetime.combine(target.date(), window_end, tzinfo=SCHEDULE_TIMEZONE)
+    while schedule_now() < end and enabled():
+        if not is_active():
+            return True
+        await asyncio.sleep(min(30, max(0, (end - schedule_now()).total_seconds())))
+    return False
+
+
+def record_schedule_attempt(schedule, persist):
+    """Record at worker entry, not when merely queuing a task.
+
+    This is an attempt marker, not a success marker. Do not replay uncertain
+    requests after a crash: remote check-ins may already have taken effect.
+    """
+    previous = schedule.copy()
+    schedule["last_run_date"] = schedule_now().date().isoformat()
+    try:
+        persist()
+    except Exception:
+        schedule.clear()
+        schedule.update(previous)
+        raise
+
+
+async def await_scheduled_run(task):
+    try:
+        await asyncio.shield(task)
+    except Exception:
+        LOGGER.exception("自动签到任务异常结束；调度器将继续运行")
+        await asyncio.sleep(30)
 
 
 async def auto_schedule_loop() -> None:
-    """Run once at a random time in each day's local midnight window."""
+    """Run once at a random time in each day's local check-in window."""
     while True:
         now = schedule_now()
-        today = now.date()
-        start, end = schedule_window(today)
-        last_run_date = schedule_state.get("last_run_date")
-
-        if last_run_date == today.isoformat() or now >= end:
-            start, end = schedule_window(today + timedelta(days=1))
-            target = start + timedelta(seconds=random.uniform(0, SCHEDULE_WINDOW_MINUTES * 60))
-        else:
-            target = now + timedelta(seconds=random.uniform(0, max(0, (end - now).total_seconds())))
+        target, changed = prepare_schedule_target(
+            schedule_state,
+            now,
+            TG_SCHEDULE_WINDOW_START,
+            TG_SCHEDULE_WINDOW_END,
+        )
+        if changed:
+            write_schedule_state()
 
         state["next_scheduled_at"] = target.isoformat(timespec="seconds")
-        LOGGER.info(
-            "自动签到已安排在 %s（%s）",
-            state["next_scheduled_at"],
-            SCHEDULE_TIMEZONE_NAME,
-        )
-        await asyncio.sleep(max(0, (target - schedule_now()).total_seconds()))
+        if changed:
+            LOGGER.info("自动签到已安排在 %s（%s）", state["next_scheduled_at"], SCHEDULE_TIMEZONE_NAME)
+        await asyncio.sleep(min(30, max(0, (target - schedule_now()).total_seconds())))
+        if schedule_now() < target:
+            continue
 
         target_date = target.date().isoformat()
         if schedule_state.get("last_run_date") == target_date:
             continue
 
-        schedule_state["last_run_date"] = target_date
-        write_schedule_state()
         state["next_scheduled_at"] = None
-        if run_is_active():
-            LOGGER.warning("自动签到时间到达，但已有签到运行中，跳过本次自动签到")
+        if not await wait_for_schedule_slot(target, TG_SCHEDULE_WINDOW_END, run_is_active):
             continue
         LOGGER.info("开始自动签到（日期 %s）", target_date)
         launch_run("scheduled")
+        await await_scheduled_run(run_task_handle)
 
 
 async def website_schedule_loop() -> None:
-    """Run the website check-in once per day at the configured local time."""
+    """Run the website check-in once per day at a random local time."""
     while True:
         settings = website_settings.copy()
         if not settings.get("enabled") or not settings.get("checkin_url") or not settings.get("cookie") or not settings.get("schedule_enabled"):
@@ -1262,31 +1338,31 @@ async def website_schedule_loop() -> None:
             continue
 
         now = schedule_now()
-        hour, minute = map(int, str(settings.get("schedule_time", "08:00")).split(":"))
-        target = datetime.combine(
-            now.date(),
-            datetime_time(hour, minute),
-            tzinfo=SCHEDULE_TIMEZONE,
+        target, changed = prepare_schedule_target(
+            website_schedule_state,
+            now,
+            WEBSITE_SCHEDULE_WINDOW_START,
+            WEBSITE_SCHEDULE_WINDOW_END,
         )
-        today = now.date().isoformat()
-        if target <= now or website_schedule_state.get("last_run_date") == today:
-            target = target + timedelta(days=1)
+        if changed:
+            write_website_schedule_state()
         website_runtime["next_scheduled_at"] = target.isoformat(timespec="seconds")
-        await asyncio.sleep(max(0, (target - schedule_now()).total_seconds()))
+        await asyncio.sleep(min(30, max(0, (target - schedule_now()).total_seconds())))
+        if schedule_now() < target:
+            continue
 
         target_date = target.date().isoformat()
         if website_schedule_state.get("last_run_date") == target_date:
             continue
-        if not website_settings.get("enabled") or not website_settings.get("schedule_enabled"):
-            continue
-        website_schedule_state["last_run_date"] = target_date
-        write_website_schedule_state()
         website_runtime["next_scheduled_at"] = None
-        if website_run_is_active():
-            LOGGER.warning("网站自动签到时间到达，但已有网站签到运行中，跳过本次自动签到")
+        if not await wait_for_schedule_slot(
+            target, WEBSITE_SCHEDULE_WINDOW_END, website_run_is_active,
+            lambda: website_settings.get("enabled") and website_settings.get("schedule_enabled") and bool(website_settings.get("cookie")),
+        ):
             continue
         LOGGER.info("开始网站自动签到（日期 %s）", target_date)
         launch_website_run("scheduled")
+        await await_scheduled_run(website_run_task_handle)
 
 
 async def execute_website_checkin(trigger: str = "manual") -> None:
@@ -1313,6 +1389,8 @@ async def execute_website_checkin(trigger: str = "manual") -> None:
             "trigger": trigger,
         }
         try:
+            if trigger == "scheduled":
+                record_schedule_attempt(website_schedule_state, write_website_schedule_state)
             settings = website_settings.copy()
             if not settings.get("enabled"):
                 raise RuntimeError("网站签到未启用")
@@ -1324,7 +1402,7 @@ async def execute_website_checkin(trigger: str = "manual") -> None:
             body = str(response.get("body", ""))
             status_code = int(response.get("status_code", 0))
             message = str(response.get("message", "")).strip()
-            if 200 <= status_code < 400 and response.get("success"):
+            if response.get("already") or (200 <= status_code < 400 and response.get("success")):
                 status = "success"
                 result_message = message or "NodeSeek 签到成功"
             elif 200 <= status_code < 400:
@@ -1382,6 +1460,8 @@ async def execute_all(trigger: str = "manual") -> None:
         auth_future = None
         client = None
         try:
+            if trigger == "scheduled":
+                record_schedule_attempt(schedule_state, write_schedule_state)
             items = read_config()
             tasks = [task for task in parse_tasks(items) if task.enabled]
             if not tasks:
@@ -1415,10 +1495,14 @@ async def execute_all(trigger: str = "manual") -> None:
                 result = {"bot": task.bot, "command": task.command, "status": "running", "started_at": now_iso()}
                 state["results"].append(result)
                 points = None
+                reward = None
+                balance = None
                 try:
                     outcome = await run_task(client, task)
                     if isinstance(outcome, dict):
                         points = outcome.get("points")
+                        reward = outcome.get("reward")
+                        balance = outcome.get("balance")
                 except asyncio.TimeoutError:
                     result.update(status="timeout", message="等待回复超时")
                 except FloodWaitError as exc:
@@ -1433,11 +1517,15 @@ async def execute_all(trigger: str = "manual") -> None:
                     result["message"] = "完成"
                 result["finished_at"] = now_iso()
                 result["points"] = points
+                result["reward"] = reward
+                result["balance"] = balance
                 bot_history[task.bot] = {
                     "bot": task.bot,
                     "status": result["status"],
                     "message": result.get("message", ""),
                     "points": points,
+                    "reward": reward,
+                    "balance": balance,
                     "last_run_at": result["finished_at"],
                     "trigger": trigger,
                 }
@@ -1477,10 +1565,10 @@ async def start_scheduler() -> None:
 
 @app.on_event("shutdown")
 async def stop_scheduler() -> None:
-    global scheduler_task, website_scheduler_task, website_login_task_handle
+    global scheduler_task, website_scheduler_task
     active_tasks = [
         task
-        for task in (scheduler_task, website_scheduler_task, website_login_task_handle)
+        for task in (scheduler_task, website_scheduler_task, run_task_handle, website_run_task_handle)
         if task is not None
     ]
     for task in active_tasks:
@@ -1492,7 +1580,6 @@ async def stop_scheduler() -> None:
             pass
     scheduler_task = None
     website_scheduler_task = None
-    website_login_task_handle = None
 
 
 @app.get("/healthz")
