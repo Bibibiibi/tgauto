@@ -1,6 +1,6 @@
 services:
   tg-checkin:
-    build: .
+    image: ghcr.io/bibibiibi/tgauto:latest
     container_name: tg-checkin
     restart: unless-stopped
     environment:

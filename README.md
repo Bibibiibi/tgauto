@@ -75,12 +75,25 @@ Web 控制台也可以在“Telegram API 配置”区域保存 `API ID`、`API H
 
 NodeSeek 账号密码登录会直接请求官方登录接口，账号和密码仅在一次登录任务的内存中使用，成功后只保存 Cookie，不写入配置、历史或日志，接口和页面也不会回显账号密码。Cookie 保存在 `./data/website_checkin.json`，文件会设置为仅所有者可读写。签到结果和自动调度状态分别保存在 `./data/website_checkin_history.json`、`./data/website_schedule.json`。
 
-先准备环境变量和目录：
+先准备环境变量和目录。GitHub Actions 会在推送 `main` 后自动构建并发布
+`ghcr.io/bibibiibi/tgauto:latest`，服务器不需要安装 Python 或在本地编译：
 
 ```bash
 cp .env.example .env
 mkdir -p data
-docker compose build
+docker compose up -d
+```
+
+如果这个 GHCR 镜像被设置为私有，先登录一次（公开镜像不需要这一步）：
+
+```bash
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u GITHUB_USERNAME --password-stdin
+```
+
+之后更新版本时执行：
+
+```bash
+docker compose pull
 docker compose up -d
 ```
 
