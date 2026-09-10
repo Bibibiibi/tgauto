@@ -1,0 +1,11 @@
+.env
+.test-server.md
+.venv/
+data/
+*.session
+*.session-journal
+settings.json
+__pycache__/
+*.py[cod]
+.git/
+.DS_Store

@@ -1,0 +1,42 @@
+services:
+  tg-checkin:
+    build: .
+    container_name: tg-checkin
+    restart: unless-stopped
+    environment:
+      TG_API_ID: ${TG_API_ID:-}
+      TG_API_HASH: ${TG_API_HASH:-}
+      TG_PHONE: ${TG_PHONE:-}
+      TG_CONFIG: /app/data/bots.json
+      TG_SESSION: /app/data/tg_checkin.session
+      TG_SETTINGS: /app/data/settings.json
+      TG_WEBSITE_SETTINGS: /app/data/website_checkin.json
+      TG_WEBSITE_HISTORY: /app/data/website_checkin_history.json
+      TG_WEBSITE_SCHEDULE_STATE: /app/data/website_schedule.json
+      TG_PROXY_SETTINGS: /app/data/proxy_settings.json
+      MIHOMO_CONFIG_PATH: /app/data/mihomo/config.yaml
+      MIHOMO_API_URL: http://mihomo:9090
+      MIHOMO_API_SECRET: ${MIHOMO_API_SECRET:-}
+      MIHOMO_PROXY_HOST: mihomo
+      MIHOMO_PROXY_PORT: 7890
+      MIHOMO_HEALTHCHECK_URL: ${MIHOMO_HEALTHCHECK_URL:-https://telegram.org}
+      MIHOMO_HEALTHCHECK_EXPECTED_STATUS: ${MIHOMO_HEALTHCHECK_EXPECTED_STATUS:-200-399}
+      NODESEEK_IMPERSONATE: ${NODESEEK_IMPERSONATE:-chrome136}
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./web:/app/web:ro
+
+  mihomo:
+    image: metacubex/mihomo:v1.19.30
+    container_name: tgauto-mihomo
+    restart: unless-stopped
+    depends_on:
+      tg-checkin:
+        condition: service_started
+    command: ["-d", "/root/.config/mihomo", "-f", "/root/.config/mihomo/config.yaml"]
+    volumes:
+      - ./data/mihomo:/root/.config/mihomo

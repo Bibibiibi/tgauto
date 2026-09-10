@@ -1,0 +1,18 @@
+[
+  {
+    "bot": "@example_checkin_bot",
+    "command": "/checkin",
+    "timeout": 30,
+    "pause_after": 2,
+    "enabled": false
+  },
+  {
+    "bot": "@another_bot",
+    "command": "/start",
+    "button": "Daily check-in",
+    "timeout": 30,
+    "click_wait": 5,
+    "pause_after": 2,
+    "enabled": false
+  }
+]

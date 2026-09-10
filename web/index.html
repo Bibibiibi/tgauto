@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Telegram 签到控制台</title>
+  <script>
+    (() => {
+      try {
+        const saved = localStorage.getItem('tgauto-theme');
+        const theme = saved || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.dataset.theme = theme;
+      } catch (_) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    })();
+  </script>
+  <style>
+    :root { color-scheme: light; --ink:#17211b; --muted:#718078; --line:#dce5df; --paper:#f4f7f5; --panel:#fff; --green:#18794e; --green-soft:#e6f4eb; --red:#b42318; --nav:#14231d; --nav-muted:#91a69a; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--paper); font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+    button { border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:6px; padding:9px 14px; cursor:pointer; font:inherit; }
+    button:hover { border-color:#9ab4a3; } button:focus-visible { outline:3px solid #b8d9c4; outline-offset:2px; }
+    button.primary { background:var(--green); border-color:var(--green); color:#fff; } button:disabled { opacity:.55; cursor:wait; }
+    .app-shell { min-height:100vh; display:flex; }
+    .sidebar { width:244px; flex:0 0 244px; min-height:100vh; display:flex; flex-direction:column; background:var(--nav); color:#eef5f0; padding:22px 14px 16px; }
+    .brand { display:flex; align-items:center; gap:11px; padding:2px 10px 28px; }
+    .brand-mark { width:34px; height:34px; display:grid; place-items:center; border:1px solid #6fb38b; border-radius:8px; color:#d5f4df; font-size:12px; font-weight:700; letter-spacing:.04em; }
+    .brand strong { display:block; font-size:15px; letter-spacing:.02em; } .brand span { display:block; color:var(--nav-muted); font-size:11px; margin-top:2px; }
+    .nav-label { color:#718b7b; font-size:11px; font-weight:700; letter-spacing:.08em; padding:0 12px 8px; text-transform:uppercase; }
+    .nav-item { width:100%; display:flex; align-items:center; gap:10px; border:0; border-radius:6px; padding:10px 12px; background:transparent; color:#c3d2c8; text-align:left; }
+    .nav-item:hover { border-color:transparent; background:#20352b; color:#fff; } .nav-item.active { background:#28523c; color:#fff; }
+    .nav-icon { width:18px; color:#9fc8ad; font-size:15px; text-align:center; } .nav-item.active .nav-icon { color:#d8f2df; }
+    .nav-group { margin-bottom:2px; }
+    .nav-toggle { justify-content:flex-start; }
+    .nav-chevron { margin-left:auto; color:#88a291; font-size:15px; line-height:1; transition:transform .16s ease; }
+    .nav-toggle.expanded .nav-chevron { transform:rotate(180deg); color:#d8f2df; }
+    .nav-submenu { margin:2px 0 10px 21px; padding-left:9px; border-left:1px solid #375442; }
+    .nav-subitem { padding:8px 10px; color:#9fb4a5; font-size:13px; } .nav-subitem.active { background:#1f3c2d; color:#fff; }
+    .sidebar-foot { display:flex; align-items:center; gap:9px; margin-top:auto; padding:13px 10px 2px; border-top:1px solid #294236; color:#d6e4da; }
+    .sidebar-foot strong { display:block; font-size:12px; } .sidebar-foot span { display:block; color:var(--nav-muted); font-size:11px; margin-top:2px; }
+    .connection-dot { width:8px; height:8px; flex:0 0 8px; border-radius:50%; background:#65c486; box-shadow:0 0 0 4px rgba(101,196,134,.13); }
+    .main-shell { min-width:0; flex:1; padding:30px 34px 46px; }
+    .topbar { max-width:1420px; margin:0 auto 24px; display:flex; align-items:flex-end; justify-content:space-between; gap:24px; }
+    .breadcrumb { display:flex; gap:7px; align-items:center; color:var(--muted); font-size:12px; margin-bottom:8px; } .breadcrumb strong { color:var(--ink); font-weight:600; }
+    h1 { margin:0; font-size:27px; letter-spacing:0; } .subtitle { color:var(--muted); margin-top:6px; }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; } .content-grid { max-width:1420px; margin:0 auto; display:grid; grid-template-columns:minmax(0,1.5fr) minmax(320px,.78fr); gap:20px; align-items:start; }
+    section { background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden; } .section-head { padding:17px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:12px; } h2 { margin:0; font-size:16px; } .section-body { padding:18px 20px; }
+    .side-stack { display:grid; gap:20px; min-width:0; }
+    .table-wrap { overflow-x:auto; } table { width:100%; min-width:820px; border-collapse:collapse; } th { color:var(--muted); font-size:12px; font-weight:600; text-align:left; padding:0 8px 10px; } td { border-top:1px solid var(--line); padding:10px 8px; vertical-align:middle; } td:first-child,th:first-child { padding-left:0; } td:last-child,th:last-child { padding-right:0; }
+    input[type=text], input[type=number], input[type=password] { width:100%; border:1px solid var(--line); border-radius:5px; padding:7px 8px; color:var(--ink); background:#fbfdfb; font:inherit; } input[type=number] { min-width:68px; } input:focus { outline:2px solid #b8d9c4; outline-offset:1px; } .check { width:16px; height:16px; accent-color:var(--green); }
+    .icon-btn { padding:6px 9px; color:var(--red); } .empty { color:var(--muted); text-align:center; padding:26px; }
+    .status-line { display:flex; align-items:center; gap:10px; font-weight:600; } .dot { width:9px; height:9px; border-radius:50%; background:#8b9b92; } .dot.running { background:#d78700; box-shadow:0 0 0 4px #fff2d6; }
+    .meta { color:var(--muted); margin:10px 0 18px; } .results { display:grid; gap:8px; } .result { border:1px solid var(--line); border-radius:6px; padding:10px 12px; display:flex; justify-content:space-between; gap:12px; } .result-main { min-width:0; } .result-bot { font-weight:600; } .result-msg { color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .pill { white-space:nowrap; font-size:12px; padding:3px 7px; border-radius:99px; background:#eef2ef; color:var(--muted); align-self:flex-start; } .pill.success { color:var(--green); background:var(--green-soft); } .pill.failed,.pill.timeout { color:var(--red); background:#fff0ee; }
+    pre { background:#122019; color:#dbe9df; border-radius:6px; min-height:170px; max-height:340px; overflow:auto; padding:12px; margin:0; font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; } .note { font-size:12px; color:var(--muted); margin-top:12px; }
+    .settings-grid { display:grid; grid-template-columns:1fr; gap:12px; } .field { display:grid; gap:5px; } .field label { color:var(--muted); font-size:12px; font-weight:600; } .setting-state { color:var(--muted); font-size:12px; font-weight:500; } .setting-state.ready { color:var(--green); }
+    .auth-panel { max-width:1420px; margin:0 auto 20px; border-color:#e7c98a; background:#fffaf0; } .auth-panel .section-head { border-bottom-color:#ecd9ad; } .auth-panel .section-body { display:flex; align-items:end; gap:12px; flex-wrap:wrap; } .auth-copy { flex:1 1 280px; } .auth-copy strong { display:block; margin-bottom:4px; } .auth-copy span { color:var(--muted); } .auth-entry { display:flex; gap:8px; flex:1 1 320px; } .auth-entry input { flex:1; min-width:0; }
+    .home-view { max-width:1420px; margin:0 auto; } .home-head { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; margin-bottom:24px; } .home-head h1 { margin:0; } .home-head .subtitle { margin-top:6px; }
+    .stat-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:20px; } .stat-card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px 18px; } .stat-label { color:var(--muted); font-size:12px; } .stat-value { display:block; margin-top:7px; font-size:25px; font-weight:700; letter-spacing:0; } .stat-value.points { color:var(--green); }
+    .dashboard-table-wrap { overflow-x:auto; } .dashboard-table { width:100%; min-width:640px; border-collapse:collapse; } .dashboard-table th { color:var(--muted); font-size:12px; font-weight:600; text-align:left; padding:0 10px 10px; } .dashboard-table td { border-top:1px solid var(--line); padding:13px 10px; } .dashboard-table th:first-child,.dashboard-table td:first-child { padding-left:0; } .dashboard-table th:last-child,.dashboard-table td:last-child { padding-right:0; } .bot-cell { font-weight:600; } .status-badge { display:inline-flex; align-items:center; gap:6px; color:var(--muted); } .status-badge::before { content:""; width:7px; height:7px; border-radius:50%; background:#98a69d; } .status-badge.success { color:var(--green); } .status-badge.success::before { background:var(--green); } .status-badge.failed,.status-badge.timeout { color:var(--red); } .status-badge.failed::before,.status-badge.timeout::before { background:var(--red); } .status-badge.running { color:var(--amber); } .status-badge.running::before { background:#d78700; } .points-value { color:var(--green); font-weight:700; }
+    .subscription-view { max-width:1420px; margin:0 auto; } .proxy-form { display:grid; grid-template-columns:minmax(0,1fr) 240px; gap:14px; align-items:end; } .proxy-form .field:first-child { min-width:0; } .proxy-actions { grid-column:1 / -1; display:flex; gap:10px; flex-wrap:wrap; } .proxy-status-line { display:flex; align-items:center; gap:9px; color:var(--muted); } .proxy-status-line strong { color:var(--ink); } .proxy-dot { width:8px; height:8px; border-radius:50%; background:#98a69d; } .proxy-dot.ready { background:var(--green); box-shadow:0 0 0 4px var(--green-soft); } .proxy-dot.warn { background:#d78700; box-shadow:0 0 0 4px #fff2d6; } .proxy-toolbar { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; } .proxy-switch { display:inline-flex; align-items:center; gap:8px; color:var(--muted); font-weight:600; } .proxy-switch input { width:16px; height:16px; accent-color:var(--green); } .proxy-preview { color:var(--muted); font-size:12px; margin-top:5px; word-break:break-all; } .proxy-table-wrap { overflow-x:auto; } .proxy-table { width:100%; min-width:680px; border-collapse:collapse; } .proxy-table th { color:var(--muted); font-size:12px; font-weight:600; text-align:left; padding:0 10px 10px; } .proxy-table td { border-top:1px solid var(--line); padding:12px 10px; } .proxy-table th:first-child,.proxy-table td:first-child { padding-left:0; } .proxy-table th:last-child,.proxy-table td:last-child { padding-right:0; text-align:right; } .node-name { font-weight:600; } .node-type { color:var(--muted); font-size:12px; margin-top:2px; } .node-state { color:var(--muted); } .node-state.alive { color:var(--green); } .node-state.dead { color:var(--red); } .node-selected { color:var(--green); font-weight:600; }
+    .toast { position:fixed; right:22px; bottom:22px; background:#122019; color:#fff; padding:11px 14px; border-radius:6px; opacity:0; transform:translateY(8px); transition:.18s; pointer-events:none; } .toast.show { opacity:1; transform:none; }
+    @media (max-width:900px) { .app-shell { display:block; } .sidebar { width:100%; min-height:auto; padding:16px 14px 12px; } .brand { padding-bottom:16px; } .nav-label { display:none; } .side-nav { display:flex; align-items:center; gap:6px; } .nav-item { width:auto; } .nav-group { display:contents; } .nav-submenu { margin:0; padding:0; border:0; } .sidebar-foot { display:none; } .main-shell { padding:24px 16px 36px; } .topbar,.home-head { align-items:flex-start; flex-direction:column; } .content-grid { grid-template-columns:1fr; } .stat-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .proxy-form { grid-template-columns:1fr; } }
+    @media (max-width:520px) { .stat-grid { grid-template-columns:1fr 1fr; gap:9px; } .stat-card { padding:13px; } .stat-value { font-size:21px; } }
+
+    /* Shared console surface: more space, softer edges, clearer hierarchy. */
+    :root { --ink:#17231c; --muted:#718078; --line:#dfe8e2; --paper:#f3f6f4; --panel:#fff; --green:#16764d; --green-soft:#e7f4ec; --red:#b42318; --nav:#102119; --nav-muted:#92a99b; }
+    body { color:var(--ink); background:var(--paper); font-size:15px; line-height:1.55; }
+    button { min-height:42px; border-color:#d5e0d9; border-radius:9px; padding:10px 16px; font-weight:600; transition:background .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease; }
+    button:hover { border-color:#9fbea9; background:#f7fbf8; box-shadow:0 3px 10px rgba(24,67,45,.08); transform:translateY(-1px); }
+    button.primary { background:var(--green); border-color:var(--green); box-shadow:0 4px 12px rgba(22,118,77,.18); }
+    button.primary:hover { background:#0f6842; border-color:#0f6842; }
+    .app-shell { min-height:100vh; }
+    .sidebar { width:264px; flex-basis:264px; padding:28px 18px 20px; box-shadow:12px 0 30px rgba(25,55,39,.08); }
+    .brand { gap:12px; padding:4px 10px 34px; }
+    .brand-mark { width:40px; height:40px; border:1px solid #6daa88; border-radius:12px; background:#18382b; color:#e0f6e7; font-size:13px; }
+    .brand strong { font-size:16px; }
+    .brand span { margin-top:4px; letter-spacing:.02em; }
+    .nav-label { padding:0 14px 10px; color:#719080; }
+    .nav-item { min-height:44px; gap:12px; border-radius:10px; padding:11px 14px; font-size:14px; }
+    .nav-item:hover { background:#1c382b; }
+    .nav-item.active { background:#286143; box-shadow:inset 0 0 0 1px rgba(196,239,210,.08); }
+    .nav-icon { width:19px; font-size:16px; }
+    .nav-group { margin-bottom:4px; }
+    .standalone-log-nav { margin-top:10px; }
+    .nav-submenu { margin:5px 0 12px 24px; padding-left:12px; border-left-color:#355845; }
+    .nav-subitem { min-height:40px; padding:9px 12px; color:#a9bdaf; font-size:13px; }
+    .nav-subitem.active { background:#1c392c; }
+    .sidebar-foot { margin-top:auto; padding:16px 12px 4px; }
+    .main-shell { padding:42px 48px 64px; }
+    .topbar,.home-head { max-width:1320px; margin-bottom:32px; }
+    .breadcrumb { margin-bottom:10px; font-size:12px; }
+    h1 { font-size:30px; font-weight:750; line-height:1.22; }
+    .subtitle { margin-top:9px; font-size:14px; }
+    .actions { gap:12px; }
+    .content-grid { max-width:1320px; gap:24px; }
+    section { border-color:var(--line); border-radius:12px; box-shadow:0 2px 10px rgba(29,62,43,.045); }
+    .section-head { min-height:68px; padding:20px 26px; background:#fcfdfc; border-bottom-color:#e6ece8; }
+    h2 { font-size:17px; font-weight:700; }
+    .section-body { padding:26px; }
+    .side-stack { gap:24px; }
+    table { min-width:820px; }
+    th { padding:0 14px 14px; font-size:12px; letter-spacing:.01em; }
+    td { padding:16px 14px; }
+    td:first-child,th:first-child { padding-left:0; }
+    td:last-child,th:last-child { padding-right:0; }
+    input[type=text], input[type=number], input[type=password], input[type=url] { min-height:42px; border-color:#d7e2db; border-radius:8px; padding:10px 12px; background:#fbfdfb; }
+    input:focus { outline:3px solid #d5ecdd; border-color:#86b99a; }
+    .empty { padding:36px 26px; }
+    .status-line { gap:11px; }
+    .meta { margin:12px 0 22px; }
+    .results { gap:10px; }
+    .result { border-color:#e0e9e3; border-radius:9px; padding:14px 16px; }
+    .pill { padding:4px 9px; }
+    pre { min-height:190px; border-radius:10px; padding:18px; line-height:1.7; box-shadow:inset 0 0 0 1px rgba(180,224,196,.05); }
+    .note { margin-top:14px; line-height:1.65; }
+    .settings-grid { gap:16px; }
+    .field { gap:7px; }
+    .field label { font-size:12px; }
+    .auth-panel { margin-bottom:24px; border-radius:12px; }
+    .auth-panel .section-body { padding:24px 26px; }
+    .home-view,.subscription-view { max-width:1320px; }
+    .stat-grid { gap:18px; margin-bottom:24px; }
+    .stat-card { min-height:118px; border-color:var(--line); border-radius:12px; padding:22px 24px; box-shadow:0 2px 10px rgba(29,62,43,.045); }
+    .stat-label { font-size:12px; }
+    .stat-value { margin-top:10px; font-size:30px; line-height:1; }
+    .dashboard-table th { padding:0 14px 14px; }
+    .dashboard-table td { padding:17px 14px; }
+    .subscription-view > section { margin-top:20px; }
+    .proxy-form { gap:18px; }
+    .proxy-actions { gap:12px; margin-top:2px; }
+    .proxy-preview { margin-top:8px; line-height:1.6; }
+    .proxy-table th { padding:0 14px 14px; }
+    .proxy-table td { padding:17px 14px; }
+    .proxy-table tbody tr:hover,.dashboard-table tbody tr:hover,#tasks tr:hover { background:#fbfdfb; }
+    .node-name { font-size:14px; }
+    .node-type { margin-top:4px; }
+    .toast { right:28px; bottom:28px; border-radius:10px; padding:13px 17px; box-shadow:0 8px 26px rgba(15,32,24,.2); }
+    /* Page views are layouts, not cards. Keep the card treatment for their actual panels. */
+    .home-view,.subscription-view { background:transparent; border:0; border-radius:0; box-shadow:none; overflow:visible; }
+    .home-head,.topbar { padding:0 4px; align-items:center; margin-bottom:22px; }
+    #homeRuntime { margin-bottom:20px; }
+    .console-subview { max-width:1320px; margin:0 auto; }
+    /* The task view has one panel; let it use the full workspace instead of leaving an empty second column. */
+    #consoleTasksView .content-grid { grid-template-columns:minmax(0,1fr); }
+    @media (max-width:1600px) and (min-width:901px) {
+      .main-shell { padding:34px 32px 52px; }
+      .home-view,.subscription-view,.topbar,.content-grid { max-width:none; }
+      .stat-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+      .content-grid { grid-template-columns:minmax(0,1.25fr) minmax(300px,.75fr); gap:20px; }
+      h1 { font-size:28px; }
+    }
+    @media (max-width:1180px) and (min-width:901px) {
+      .sidebar { width:224px; flex-basis:224px; }
+      .content-grid { grid-template-columns:1fr; }
+      .side-stack { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .side-stack > section:last-child { grid-column:1 / -1; }
+      .home-head,.topbar { align-items:flex-start; flex-direction:column; }
+      .home-head .actions,.topbar .actions { align-self:flex-start; }
+    }
+    @media (max-width:900px) { .sidebar { width:100%; padding:18px 16px 14px; box-shadow:0 8px 22px rgba(25,55,39,.08); } .brand { padding-bottom:20px; } .main-shell { padding:30px 20px 44px; } .topbar,.home-head { margin-bottom:26px; } .section-head { padding:18px 20px; } .section-body { padding:22px 20px; } .stat-grid { gap:14px; } }
+    @media (max-width:520px) { h1 { font-size:26px; } .main-shell { padding:24px 14px 36px; } .stat-grid { gap:10px; } .stat-card { min-height:102px; padding:17px; } .stat-value { font-size:24px; } .section-head { min-height:60px; padding:16px; } .section-body { padding:18px 16px; } }
+    /* Final polish: layered workspace, stronger hierarchy, and tactile states. */
+    :root {
+      --ink:#15231b;
+      --muted:#728278;
+      --line:#dbe7df;
+      --paper:#eef4f0;
+      --panel:rgba(255,255,255,.9);
+      --green:#147a4e;
+      --green-dark:#0d5d3b;
+      --green-soft:#e3f4e9;
+      --amber:#b36b00;
+      --shadow-sm:0 4px 16px rgba(25,72,47,.055);
+      --shadow-md:0 16px 38px rgba(25,72,47,.085);
+    }
+    html { scroll-behavior:smooth; }
+    body {
+      background:
+        radial-gradient(circle at 88% -10%, rgba(182,224,197,.52), transparent 34rem),
+        radial-gradient(circle at 18% 0%, rgba(255,255,255,.95), transparent 30rem),
+        var(--paper);
+    }
+    body::before {
+      content:"";
+      position:fixed;
+      z-index:-1;
+      inset:0;
+      pointer-events:none;
+      opacity:.35;
+      background-image:linear-gradient(rgba(53,109,78,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(53,109,78,.035) 1px,transparent 1px);
+      background-size:32px 32px;
+      mask-image:linear-gradient(to bottom,black,transparent 82%);
+    }
+    .sidebar {
+      position:sticky;
+      top:0;
+      height:100vh;
+      background:linear-gradient(165deg,#10271d 0%,#102119 58%,#0d1b16 100%);
+      box-shadow:16px 0 38px rgba(17,48,32,.12);
+    }
+    .sidebar::after {
+      content:"";
+      position:absolute;
+      width:180px;
+      height:180px;
+      right:-100px;
+      top:180px;
+      border-radius:50%;
+      background:rgba(92,180,126,.08);
+      filter:blur(2px);
+      pointer-events:none;
+    }
+    .brand-mark {
+      background:linear-gradient(145deg,#2b7952,#173e2d);
+      border-color:rgba(170,235,190,.5);
+      box-shadow:0 8px 20px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.14);
+    }
+    .brand strong { letter-spacing:.01em; }
+    .nav-label { letter-spacing:.14em; }
+    .nav-item {
+      position:relative;
+      overflow:hidden;
+      transition:background .18s ease,color .18s ease,transform .18s ease;
+    }
+    .nav-item::before {
+      content:"";
+      position:absolute;
+      left:0;
+      top:9px;
+      bottom:9px;
+      width:3px;
+      border-radius:0 4px 4px 0;
+      background:#a9e8be;
+      opacity:0;
+      transition:opacity .18s ease;
+    }
+    .nav-item:hover { transform:translateX(2px); }
+    .nav-item.active::before { opacity:1; }
+    .connection-dot { animation:connection-pulse 2.6s ease-in-out infinite; }
+    @keyframes connection-pulse { 0%,100% { box-shadow:0 0 0 4px rgba(101,196,134,.13); } 50% { box-shadow:0 0 0 7px rgba(101,196,134,.03); } }
+    .main-shell { position:relative; }
+    h1 { letter-spacing:-.035em; }
+    .breadcrumb strong { color:var(--green-dark); }
+    .subtitle { max-width:700px; }
+    section {
+      background:var(--panel);
+      border-color:rgba(204,220,210,.9);
+      box-shadow:var(--shadow-sm);
+      backdrop-filter:blur(12px);
+    }
+    section:hover { box-shadow:var(--shadow-md); }
+    .section-head { background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(249,252,250,.8)); }
+    .section-head h2 { letter-spacing:-.015em; }
+    .section-head h2::before {
+      content:"";
+      display:inline-block;
+      width:7px;
+      height:7px;
+      margin:0 9px 2px 0;
+      border-radius:50%;
+      background:#79b593;
+      box-shadow:0 0 0 4px #e7f3eb;
+    }
+    .stat-card {
+      position:relative;
+      overflow:hidden;
+      background:linear-gradient(145deg,rgba(255,255,255,.96),rgba(246,251,248,.9));
+      transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease;
+    }
+    .stat-card::before {
+      content:"";
+      position:absolute;
+      right:-22px;
+      top:-30px;
+      width:112px;
+      height:112px;
+      border-radius:50%;
+      background:rgba(78,164,108,.08);
+    }
+    .stat-card::after {
+      position:absolute;
+      right:22px;
+      top:19px;
+      color:#76ad8a;
+      font-size:23px;
+      font-weight:700;
+      opacity:.72;
+    }
+    .stat-card:nth-child(1)::after { content:"⌁"; }
+    .stat-card:nth-child(2)::after { content:"✓"; }
+    .stat-card:nth-child(3)::after { content:"!"; }
+    .stat-card:nth-child(4)::after { content:"✦"; }
+    .stat-card:hover { transform:translateY(-3px); border-color:#b9d6c3; box-shadow:0 15px 32px rgba(24,92,57,.11); }
+    .stat-label,.stat-value { position:relative; z-index:1; }
+    .stat-label { letter-spacing:.02em; }
+    .stat-value.points { text-shadow:0 4px 16px rgba(20,122,78,.14); }
+    .dashboard-table tbody tr,.proxy-table tbody tr,#tasks tr { transition:background .16s ease,transform .16s ease; }
+    .dashboard-table tbody tr:hover,.proxy-table tbody tr:hover,#tasks tr:hover { background:#f5faf7; }
+    .status-badge { padding:5px 9px; border-radius:999px; background:#f0f3f1; font-size:12px; font-weight:600; }
+    .status-badge::before { width:6px; height:6px; }
+    .status-badge.success { background:var(--green-soft); }
+    .status-badge.failed,.status-badge.timeout { background:#fff0ee; }
+    .result { background:rgba(251,253,251,.78); transition:border-color .16s ease,transform .16s ease,box-shadow .16s ease; }
+    .result:hover { border-color:#b9d6c3; transform:translateX(2px); box-shadow:0 5px 16px rgba(25,72,47,.06); }
+    .pill { font-weight:600; }
+    .auth-panel { background:linear-gradient(135deg,#fffaf0,#fffdf7); box-shadow:0 8px 24px rgba(161,111,31,.08); }
+    .proxy-status-line,.status-line { padding:8px 12px; border:1px solid #dce9df; border-radius:999px; background:rgba(255,255,255,.72); }
+    .proxy-dot.ready { box-shadow:0 0 0 4px var(--green-soft); }
+    .empty { color:#84938a; }
+    input:hover { border-color:#b8d3c1; }
+    pre { background:linear-gradient(145deg,#11251c,#0d1d16); border:1px solid rgba(148,205,169,.12); }
+    .toast { background:linear-gradient(135deg,#173b2a,#10271d); }
+    @media (max-width:900px) {
+      .sidebar { position:relative; height:auto; }
+      .sidebar::after { display:none; }
+      .side-nav { overflow-x:auto; padding-bottom:2px; scrollbar-width:none; }
+      .side-nav::-webkit-scrollbar { display:none; }
+      .nav-item:hover { transform:none; }
+      .nav-item::before { display:none; }
+      .nav-item.active { box-shadow:inset 0 -2px 0 #a9e8be; }
+      section:hover { box-shadow:var(--shadow-sm); }
+      .proxy-status-line,.status-line { align-self:flex-start; }
+    }
+    @media (prefers-reduced-motion:reduce) {
+      *,*::before,*::after { scroll-behavior:auto !important; animation-duration:.01ms !important; transition-duration:.01ms !important; }
+    }
+
+    /* Gemini-inspired neutral UI and persistent light/dark themes. */
+    :root {
+      color-scheme:light;
+      --ink:#202124;
+      --muted:#6f747a;
+      --line:#dfe3e7;
+      --paper:#f8fafd;
+      --panel:#ffffff;
+      --panel-soft:#f1f3f4;
+      --panel-hover:#edf3fc;
+      --accent:#1a73e8;
+      --accent-hover:#1557b0;
+      --accent-soft:#e8f0fe;
+      --accent-ink:#174ea6;
+      --green:#188038;
+      --green-dark:#137333;
+      --green-soft:#e6f4ea;
+      --red:#d93025;
+      --red-soft:#fce8e6;
+      --amber:#b06000;
+      --amber-soft:#fef7e0;
+      --nav:#f0f4f9;
+      --nav-muted:#6f747a;
+      --shadow-sm:0 1px 2px rgba(60,64,67,.08);
+      --shadow-md:0 4px 12px rgba(60,64,67,.12);
+    }
+    html[data-theme="dark"] {
+      color-scheme:dark;
+      --ink:#e8eaed;
+      --muted:#9aa0a6;
+      --line:#3c4043;
+      --paper:#202124;
+      --panel:#282a2f;
+      --panel-soft:#303134;
+      --panel-hover:#343943;
+      --accent:#8ab4f8;
+      --accent-hover:#aecbfa;
+      --accent-soft:#394457;
+      --accent-ink:#d2e3fc;
+      --green:#81c995;
+      --green-dark:#81c995;
+      --green-soft:#263d2d;
+      --red:#f28b82;
+      --red-soft:#4b2a2a;
+      --amber:#fdd663;
+      --amber-soft:#493b20;
+      --nav:#1b1d21;
+      --nav-muted:#9aa0a6;
+      --shadow-sm:none;
+      --shadow-md:none;
+    }
+    body {
+      color:var(--ink);
+      background:var(--paper);
+      background-image:none;
+      transition:background-color .2s ease,color .2s ease;
+    }
+    body::before { display:none; }
+    .sidebar {
+      background:var(--nav);
+      color:var(--ink);
+      border-right:1px solid var(--line);
+      box-shadow:none;
+    }
+    .sidebar::after { display:none; }
+    .brand-mark {
+      color:#fff;
+      background:linear-gradient(145deg,#4285f4,#7c4dff);
+      border:0;
+      box-shadow:none;
+      border-radius:14px;
+    }
+    .brand strong { color:var(--ink); }
+    .brand span,.nav-label { color:var(--nav-muted); }
+    .nav-item {
+      color:var(--muted);
+      border:0;
+      background:transparent;
+      box-shadow:none;
+    }
+    .nav-item:hover {
+      color:var(--ink);
+      background:var(--panel-soft);
+      border-color:transparent;
+      box-shadow:none;
+      transform:none;
+    }
+    .nav-item.active {
+      color:var(--accent-ink);
+      background:var(--accent-soft);
+      box-shadow:none;
+    }
+    .nav-item::before { background:var(--accent); }
+    .nav-icon,.nav-item.active .nav-icon,.nav-chevron,.nav-toggle.expanded .nav-chevron { color:currentColor; }
+    .nav-submenu { border-left-color:var(--line); }
+    .nav-subitem.active { color:var(--accent-ink); background:var(--accent-soft); }
+    .sidebar-bottom { margin-top:auto; display:grid; gap:10px; }
+    .theme-toggle {
+      width:100%;
+      min-height:48px;
+      display:flex;
+      align-items:center;
+      gap:12px;
+      padding:10px 12px;
+      color:var(--muted);
+      background:transparent;
+      border:0;
+      border-radius:18px;
+      text-align:left;
+      box-shadow:none;
+    }
+    .theme-toggle:hover { color:var(--ink); background:var(--panel-soft); border-color:transparent; box-shadow:none; transform:none; }
+    .theme-icon { width:24px; text-align:center; font-size:18px; line-height:1; }
+    .theme-copy { min-width:0; display:grid; gap:1px; }
+    .theme-copy strong { color:inherit; font-size:13px; }
+    .theme-copy small { color:var(--nav-muted); font-size:11px; }
+    .sidebar-foot { margin-top:0; border-top-color:var(--line); color:var(--ink); }
+    .sidebar-foot span { color:var(--nav-muted); }
+    .connection-dot { background:var(--green); }
+    .main-shell { background:transparent; }
+    h1,h2 { color:var(--ink); }
+    h1 { font-weight:650; letter-spacing:-.035em; }
+    .breadcrumb strong { color:var(--accent); }
+    section {
+      color:var(--ink);
+      background:var(--panel);
+      border:1px solid var(--line);
+      box-shadow:var(--shadow-sm);
+      backdrop-filter:none;
+      transition:border-color .16s ease,background-color .2s ease;
+    }
+    section:hover { box-shadow:var(--shadow-sm); }
+    .section-head { background:var(--panel); border-bottom-color:var(--line); }
+    .section-head h2::before { background:var(--accent); box-shadow:none; }
+    .stat-card {
+      background:var(--panel);
+      border-color:var(--line);
+      box-shadow:var(--shadow-sm);
+    }
+    .stat-card::before { display:none; }
+    .stat-card::after { color:var(--accent); opacity:.65; }
+    .stat-card:hover { transform:none; border-color:var(--accent); box-shadow:var(--shadow-sm); }
+    .stat-value.points,.points-value { color:var(--green); text-shadow:none; }
+    button {
+      color:var(--ink);
+      background:var(--panel-soft);
+      border-color:var(--line);
+      border-radius:999px;
+      box-shadow:none;
+    }
+    button:hover { color:var(--ink); background:var(--panel-hover); border-color:var(--muted); box-shadow:none; transform:none; }
+    button:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 35%,transparent); outline-offset:2px; }
+    button.primary {
+      color:#fff;
+      background:#1a73e8;
+      border-color:#1a73e8;
+      box-shadow:none;
+    }
+    button.primary:hover { color:#fff; background:#1557b0; border-color:#1557b0; box-shadow:none; }
+    html[data-theme="dark"] button.primary { color:#202124; background:var(--accent); border-color:var(--accent); }
+    html[data-theme="dark"] button.primary:hover { color:#202124; background:var(--accent-hover); border-color:var(--accent-hover); }
+    input[type=text],input[type=number],input[type=password],input[type=url] {
+      color:var(--ink);
+      background:var(--panel-soft);
+      border-color:transparent;
+      border-radius:12px;
+    }
+    input:hover { border-color:var(--muted); }
+    input:focus { outline:2px solid var(--accent); border-color:transparent; }
+    input::placeholder { color:var(--muted); opacity:.8; }
+    input[type=checkbox] { accent-color:var(--accent); }
+    th { color:var(--muted); }
+    td,.dashboard-table td,.proxy-table td { border-top-color:var(--line); }
+    .dashboard-table tbody tr:hover,.proxy-table tbody tr:hover,#tasks tr:hover { background:var(--panel-soft); }
+    .status-badge,.pill { color:var(--muted); background:var(--panel-soft); }
+    .status-badge.success,.pill.success { color:var(--green); background:var(--green-soft); }
+    .status-badge.failed,.status-badge.timeout,.pill.failed,.pill.timeout { color:var(--red); background:var(--red-soft); }
+    .status-badge.running,.pill.running { color:var(--amber); background:var(--amber-soft); }
+    .result { background:var(--panel-soft); border-color:transparent; }
+    .result:hover { border-color:var(--line); transform:none; box-shadow:none; }
+    .proxy-status-line,.status-line {
+      color:var(--muted);
+      background:var(--panel-soft);
+      border-color:transparent;
+    }
+    .auth-panel { background:var(--amber-soft); border-color:color-mix(in srgb,var(--amber) 38%,var(--line)); box-shadow:none; }
+    .auth-panel .section-head { background:transparent; border-bottom-color:color-mix(in srgb,var(--amber) 25%,var(--line)); }
+    .empty { color:var(--muted); }
+    .bot-summary,.bot-editor { display:flex; align-items:center; gap:12px; min-width:0; }
+    .bot-summary-copy,.bot-editor-main { min-width:0; }
+    .bot-avatar {
+      width:36px;
+      height:36px;
+      flex:0 0 36px;
+      display:grid;
+      place-items:center;
+      overflow:hidden;
+      border-radius:50%;
+      color:#fff;
+      background:linear-gradient(145deg,#4285f4,#7c4dff);
+      font-size:12px;
+      font-weight:700;
+      letter-spacing:.02em;
+    }
+    .bot-avatar img { width:100%; height:100%; display:block; object-fit:cover; }
+    .bot-editor-main { display:grid; gap:5px; width:100%; }
+    .bot-editor-main input { min-width:130px; }
+    .bot-profile-name,.bot-username { display:block; overflow:hidden; color:var(--muted); font-size:12px; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
+    .bot-profile-name { min-height:15px; }
+    .bot-cell { font-weight:650; }
+        pre {
+      color:var(--ink);
+      background:var(--panel-soft);
+      border:1px solid var(--line);
+      box-shadow:none;
+    }
+    .toast { color:#fff; background:#303134; border:1px solid #5f6368; box-shadow:var(--shadow-md); }
+    html[data-theme="dark"] .toast { color:#202124; background:#e8eaed; border-color:#e8eaed; }
+    @media (max-width:900px) {
+      .sidebar { background:var(--nav); box-shadow:none; }
+      .sidebar-bottom { margin-top:8px; display:flex; justify-content:flex-end; }
+      .theme-toggle { width:auto; min-height:38px; padding:7px 12px; border:1px solid var(--line); }
+      .theme-icon { width:18px; font-size:16px; }
+      .theme-copy { display:block; }
+      .theme-copy small { display:none; }
+      .nav-item.active { box-shadow:inset 0 -2px 0 var(--accent); }
+    }
+    .website-view { max-width:1320px; margin:0 auto; }
+    .website-status-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,.72fr); gap:16px; }
+    .website-status-card { min-width:0; padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--panel-soft); }
+    .website-status-card strong { display:block; font-size:15px; }
+    .website-status-card span { display:block; color:var(--muted); margin-top:6px; }
+    .website-result { display:grid; gap:8px; }
+    .website-result-meta { color:var(--muted); font-size:13px; }
+    .website-result-message { font-weight:650; }
+    .website-result-message.success { color:var(--green); }
+    .website-result-message.failed { color:var(--red); }
+    .website-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+    .website-mode-switches { display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
+    .website-form .field-wide { grid-column:1 / -1; }
+    textarea, select { width:100%; border:1px solid transparent; border-radius:12px; padding:10px 12px; color:var(--ink); background:var(--panel-soft); font:inherit; resize:vertical; }
+    textarea { min-height:104px; line-height:1.5; }
+    textarea:focus, select:focus { outline:2px solid var(--accent); border-color:transparent; }
+    select { min-height:42px; }
+    .website-cookie-row { display:flex; align-items:flex-start; gap:10px; }
+    .website-cookie-row textarea { flex:1; min-width:0; }
+    .website-cookie-actions { display:grid; gap:8px; flex:0 0 auto; }
+    .website-setting-state { display:flex; align-items:center; gap:8px; min-height:42px; color:var(--muted); }
+    .website-setting-state::before { content:""; width:8px; height:8px; flex:0 0 8px; border-radius:50%; background:var(--muted); }
+    .website-setting-state.ready { color:var(--green); }
+    .website-setting-state.ready::before { background:var(--green); }
+    .website-help { padding:12px 14px; border-left:3px solid var(--accent); color:var(--muted); background:var(--accent-soft); }
+    @media (max-width:900px) {
+      .website-status-grid,.website-form { grid-template-columns:1fr; }
+      .website-form .field-wide { grid-column:auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">TG</div><div><strong>签到控制台</strong><span>Telegram Automation</span></div></div>
+      <nav class="side-nav" aria-label="主导航">
+        <div class="nav-label">工作区</div>
+        <button class="nav-item active" data-nav="home" type="button"><span class="nav-icon">⌂</span><span>首页</span></button>
+        <div class="nav-group">
+          <button id="consoleNav" class="nav-item nav-toggle" data-nav="console" type="button" aria-expanded="false" aria-controls="consoleSubmenu"><span class="nav-icon">▦</span><span>控制台</span><span class="nav-chevron" aria-hidden="true">⌄</span></button>
+          <div id="consoleSubmenu" class="nav-submenu" hidden><button class="nav-item nav-subitem" data-nav="tasks" type="button"><span class="nav-icon">✓</span><span>签到任务</span></button><button class="nav-item nav-subitem" data-nav="website" type="button"><span class="nav-icon">◎</span><span>网站签到</span></button><button class="nav-item nav-subitem" data-nav="website-settings" type="button"><span class="nav-icon">⚙</span><span>网站设置</span></button><button class="nav-item nav-subitem" data-nav="settings" type="button"><span class="nav-icon">◌</span><span>API 设置</span></button></div>
+        </div>
+        <button class="nav-item" data-nav="subscription" type="button"><span class="nav-icon">⇄</span><span>订阅</span></button>
+        <button class="nav-item standalone-log-nav" data-nav="logs" type="button"><span class="nav-icon">≡</span><span>运行日志</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <button id="themeToggle" class="theme-toggle" type="button" aria-label="切换深色模式" aria-pressed="false"><span id="themeIcon" class="theme-icon" aria-hidden="true">☾</span><span class="theme-copy"><strong id="themeLabel">深色模式</strong><small>切换界面主题</small></span></button>
+        <div class="sidebar-foot"><span class="connection-dot"></span><div><strong>服务在线</strong><span>自动调度已开启</span></div></div>
+      </div>
+    </aside>
+    <main class="main-shell">
+      <section id="authPanel" class="auth-panel" hidden><div class="section-head"><h2>Telegram 登录验证</h2><span class="setting-state">等待输入</span></div><div class="section-body"><div class="auth-copy"><strong id="authMessage">请输入登录信息</strong><span>提交后会继续当前签到流程，验证码和密码不会保存。</span></div><div class="auth-entry"><input id="authValue" type="text" autocomplete="one-time-code" placeholder="请输入验证码"><button id="authSubmit" class="primary">提交</button></div></div></section>
+      <section id="homeView" class="home-view">
+        <header class="home-head"><div><div class="breadcrumb"><strong>首页</strong></div><h1>签到概览</h1><div class="subtitle">查看每个机器人最近一次签到状态和本次获得积分</div></div><div class="actions"><button id="homeRun" class="primary">开始签到</button></div></header>
+        <div class="stat-grid"><div class="stat-card"><span class="stat-label">机器人总数</span><strong id="statBots" class="stat-value">0</strong></div><div class="stat-card"><span class="stat-label">最近成功</span><strong id="statSuccess" class="stat-value">0</strong></div><div class="stat-card"><span class="stat-label">最近失败</span><strong id="statFailed" class="stat-value">0</strong></div><div class="stat-card"><span class="stat-label">最近获得积分</span><strong id="statPoints" class="stat-value points">0</strong></div></div>
+        <section id="homeRuntime"><div class="section-head"><h2>运行状态</h2><div id="statusLine" class="status-line"><span class="dot"></span><span>空闲</span></div></div><div class="section-body"><div id="meta" class="meta">尚未运行</div><div id="scheduleMeta" class="note">自动签到：正在读取调度状态</div><div id="results" class="results"><div class="empty">暂无签到记录</div></div></div></section>
+        <section><div class="section-head"><h2>机器人签到情况</h2><span id="homeUpdated" class="setting-state">等待运行记录</span></div><div class="section-body"><div class="dashboard-table-wrap"><table class="dashboard-table"><thead><tr><th>机器人</th><th>状态</th><th>最近签到</th><th>获得积分</th><th>来源</th></tr></thead><tbody id="dashboardRows"><tr><td colspan="5" class="empty">暂无签到记录</td></tr></tbody></table></div></div></section>
+      </section>
+      <section id="subscriptionView" class="subscription-view" hidden>
+        <header class="home-head"><div><div class="breadcrumb"><strong>订阅</strong></div><h1>Telegram 代理订阅</h1><div class="subtitle">使用 Mihomo 管理节点，只为 Telegram 和 TG API 提供代理。</div></div><div id="proxyKernelStatus" class="proxy-status-line"><span class="proxy-dot"></span><strong>正在读取 Mihomo 状态</strong></div></header>
+        <section><div class="section-head"><h2>导入订阅链接</h2><span id="proxySubscriptionState" class="setting-state">未配置</span></div><div class="section-body"><div class="proxy-form"><div class="field"><label for="proxyUrl">订阅链接</label><input id="proxyUrl" type="url" inputmode="url" placeholder="https://example.com/subscribe?..." autocomplete="off"></div><div class="field"><label for="proxyName">订阅名称</label><input id="proxyName" type="text" placeholder="Telegram 订阅" maxlength="80"></div><div class="proxy-actions"><button id="proxyImport" class="primary">导入订阅</button><button id="proxyRefresh">刷新节点</button><button id="proxyRemove" class="icon-btn">清除订阅</button></div></div><div id="proxyPreview" class="proxy-preview">订阅地址不会完整显示，导入后只保留在服务器配置中。</div><div id="proxyMessage" class="note"></div></div></section>
+        <section><div class="section-head"><h2>Telegram / TG API 代理</h2><label class="proxy-switch"><input id="proxyEnabled" type="checkbox"><span>启用代理</span></label></div><div class="section-body"><div class="proxy-toolbar"><div><strong id="proxySelected">DIRECT</strong><div class="proxy-preview">当前签到和 Telegram API 连接会通过此 Mihomo 代理组。</div></div><span id="proxyEndpoint" class="setting-state">代理端口：mihomo:7890</span></div></div></section>
+        <section><div class="section-head"><h2>节点列表</h2><span id="proxyNodeMeta" class="setting-state">等待加载</span></div><div class="section-body"><div class="proxy-table-wrap"><table class="proxy-table"><thead><tr><th>节点</th><th>类型</th><th>状态</th><th>延迟</th><th></th></tr></thead><tbody id="proxyNodes"><tr><td colspan="5" class="empty">暂无节点</td></tr></tbody></table></div></div></section>
+      </section>
+      <div id="consoleView" hidden>
+        <div id="consoleWebsiteView" class="console-subview website-view" hidden>
+          <header class="topbar"><div><div class="breadcrumb"><span>控制台</span><span>/</span><strong>网站签到</strong></div><h1 id="websiteTitle">NodeSeek 签到</h1><div class="subtitle">使用 NodeSeek 接口执行每日签到</div></div><div class="actions"><button id="openWebsite" type="button">打开 NodeSeek</button><button id="runWebsite" class="primary" type="button">开始签到</button></div></header>
+          <section><div class="section-head"><h2>运行状态</h2><div id="websiteStatusLine" class="status-line"><span class="dot"></span><span id="websiteStatusLabel">未配置</span></div></div><div class="section-body"><div class="website-status-grid"><div class="website-status-card"><strong id="websiteConfigState">NodeSeek 签到未启用</strong><span id="websiteConfigDetail">请在网站设置中登录并启用签到。</span></div><div class="website-status-card"><strong id="websiteCookieState">Cookie 未配置</strong><span>Cookie 只保存在服务端，不会在页面回显。</span></div><div class="website-status-card"><strong id="websiteLoginState">登录状态：未执行</strong><span id="websiteLoginDetail">账号密码仅用于获取 Cookie，不会保存。</span></div></div><div id="websiteScheduleMeta" class="note">自动签到：正在读取调度状态</div></div></section>
+          <section><div class="section-head"><h2>最近一次结果</h2><span id="websiteLastState" class="setting-state">暂无记录</span></div><div class="section-body"><div class="website-result"><div id="websiteResultMeta" class="website-result-meta">尚未执行</div><div id="websiteResultMessage" class="website-result-message">暂无网站签到记录</div><pre id="websiteResponse">暂无响应内容</pre></div></div></section>
+        </div>
+        <div id="consoleWebsiteSettingsView" class="console-subview website-view" hidden>
+          <header class="topbar"><div><div class="breadcrumb"><span>控制台</span><span>/</span><strong>网站设置</strong></div><h1>NodeSeek 设置</h1><div class="subtitle">账号密码只用于登录获取 Cookie，签到参数由系统固定</div></div></header>
+          <section><div class="section-head"><h2>NodeSeek 登录</h2><span id="websiteSettingState" class="setting-state">未读取</span></div><div class="section-body"><div class="website-form"><div class="field"><label for="websiteUsername">NodeSeek 用户名</label><input id="websiteUsername" type="text" autocomplete="username" placeholder="输入 NodeSeek 用户名"></div><div class="field"><label for="websitePassword">NodeSeek 密码</label><input id="websitePassword" type="password" autocomplete="current-password" placeholder="仅用于本次登录，不会保存"></div></div><div class="actions" style="margin-top:18px"><button id="websiteLogin" class="primary" type="button">账号密码获取 Cookie</button><span id="websiteLoginSettingState" class="website-setting-state">等待登录</span></div><div class="website-help" style="margin-top:18px">账号密码只在登录任务运行期间保留在内存中，成功后只保存 Cookie；如果 Cookie 已失效，可以再次登录获取新的 Cookie。</div></div></section>
+          <section><div class="section-head"><h2>手动填写 Cookie</h2><span id="websiteCookieSettingState" class="website-setting-state">未配置</span></div><div class="section-body"><div class="website-form"><div class="field"><label for="websiteCookie">NodeSeek Cookie</label><input id="websiteCookie" type="password" autocomplete="off" placeholder="粘贴浏览器中的 NodeSeek Cookie"></div></div><div class="actions" style="margin-top:18px"><button id="saveWebsiteCookie" class="primary" type="button">保存 Cookie</button><button id="clearWebsiteCookie" type="button">清除 Cookie</button></div><div class="website-help" style="margin-top:18px">Cookie 只保存在服务端，不会回显到页面或写入日志；已有 Cookie 时可直接替换。</div></div></section>
+          <section><div class="section-head"><h2>签到模式</h2><span id="websiteModeState" class="website-setting-state ready">固定签到</span></div><div class="section-body"><div class="website-mode-switches"><label class="proxy-switch"><input id="websiteFixedMode" type="checkbox" checked><span>固定签到</span></label><label class="proxy-switch"><input id="websiteRandomMode" type="checkbox"><span>随机签到</span></label></div><div class="website-help" style="margin-top:18px">固定签到使用固定奖励模式，随机签到使用随机奖励模式；两个开关只能启用一个。</div></div></section>
+          <section><div class="section-head"><h2>固定签到参数</h2><span class="setting-state">NodeSeek</span></div><div class="section-body"><div class="website-status-grid"><div class="website-status-card"><strong>登录地址</strong><span id="websiteFixedLoginUrl">https://www.nodeseek.com/signIn.html</span></div><div class="website-status-card"><strong>签到接口</strong><span id="websiteFixedCheckinUrl">https://www.nodeseek.com/api/attendance?random=false</span></div><div class="website-status-card"><strong>请求方式</strong><span>POST，JSON 空请求体</span></div></div></div></section>
+          <section><div class="section-head"><h2>启用与自动签到</h2></div><div class="section-body"><div class="website-form"><div class="field"><label><input id="websiteEnabled" class="check" type="checkbox"> 启用网站签到</label></div><div class="field"><label><input id="websiteScheduleEnabled" class="check" type="checkbox"> 每日自动签到</label></div><div class="field"><label for="websiteScheduleTime">每日执行时间（上海时间）</label><input id="websiteScheduleTime" type="time" value="08:00"></div></div><div class="actions" style="margin-top:18px"><button id="saveWebsiteSettings" class="primary" type="button">保存签到设置</button></div><div class="note">自动签到会使用当前选定的 NodeSeek 签到模式，仅在签到已启用且 Cookie 已获取时执行。</div></div></section>
+        </div>
+        <div id="consoleTasksView" class="console-subview">
+          <header class="topbar"><div><div class="breadcrumb"><span>控制台</span><span>/</span><strong>签到任务</strong></div><h1>签到任务</h1><div class="subtitle">管理机器人任务，手动执行并查看最近结果 · 每天 00:00–00:20（上海时间）随机自动签到</div></div><div class="actions"><button id="reload">刷新</button><button id="run" class="primary">开始签到</button></div></header>
+          <div class="content-grid"><section id="taskSection"><div class="section-head"><h2>签到任务</h2><button id="add">添加机器人</button></div><div class="section-body"><div class="table-wrap"><table><thead><tr><th>启用</th><th>机器人</th><th>命令</th><th>按钮文字</th><th>超时</th><th>点击后等待</th><th>间隔</th><th></th></tr></thead><tbody id="tasks"></tbody></table></div><div id="empty" class="empty" hidden>还没有任务，点击“添加机器人”开始配置。</div><div class="actions" style="margin-top:16px"><button id="save" class="primary">保存配置</button></div><div class="note">按钮文字留空表示只发送命令。超时、点击后等待和间隔单位为秒。</div></div></section></div>
+        </div>
+        <div id="consoleLogsView" class="console-subview" hidden>
+          <header class="topbar"><div><div class="breadcrumb"><strong>运行日志</strong></div><h1>运行日志</h1><div class="subtitle">查看签到任务、自动调度和 Telegram 连接的运行记录</div></div><div class="actions"><button id="refreshLogs">刷新日志</button></div></header>
+          <section><div class="section-head"><h2>运行日志</h2></div><div class="section-body"><pre id="logs">暂无日志</pre></div></section>
+        </div>
+        <div id="consoleSettingsView" class="console-subview" hidden>
+          <header class="topbar"><div><div class="breadcrumb"><span>控制台</span><span>/</span><strong>API 设置</strong></div><h1>API 设置</h1><div class="subtitle">配置 Telegram API 凭据，用于首次登录和后续签到连接</div></div></header>
+          <section><div class="section-head"><h2>Telegram API 配置</h2><span id="apiState" class="setting-state">未读取</span></div><div class="section-body"><div class="settings-grid"><div class="field"><label for="apiId">API ID</label><input id="apiId" type="number" min="1" step="1" placeholder="从 my.telegram.org 获取"></div><div class="field"><label for="apiHash">API Hash</label><input id="apiHash" type="password" autocomplete="off" placeholder="填写新 Hash，留空保持不变"></div><div class="field"><label for="phone">手机号</label><input id="phone" type="text" autocomplete="tel" placeholder="例如 +8613812345678"></div></div><div class="actions" style="margin-top:16px"><button id="saveSettings" class="primary">保存 API 配置</button></div><div class="note">API Hash 不会回显。手机号仅用于首次 Telegram 登录，已有 session 时可留空。</div></div></section>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let botProfiles = {};
+    let botProfileTimer = null;
+    const profileKey = (value) => String(value || '').trim().replace(/^@+/, '').toLowerCase();
+    function botInitials(name) { return String(name || 'TG').replace(/^@+/, '').slice(0, 2).toUpperCase(); }
+    function profileAvatar(profile, fallback) { return profile && profile.photo ? `<img src="${esc(profile.photo)}" alt="">` : esc(botInitials(fallback)); }
+    function applyTheme(theme, persist=false) {
+      const isDark=theme === 'dark';
+      document.documentElement.dataset.theme=isDark ? 'dark' : 'light';
+      $('themeIcon').textContent=isDark ? '☀' : '☾';
+      $('themeLabel').textContent=isDark ? '浅色模式' : '深色模式';
+      $('themeToggle').setAttribute('aria-label', isDark ? '切换浅色模式' : '切换深色模式');
+      $('themeToggle').setAttribute('aria-pressed', String(isDark));
+      if(persist) { try { localStorage.setItem('tgauto-theme', isDark ? 'dark' : 'light'); } catch (_) {} }
+    }
+    applyTheme(document.documentElement.dataset.theme || 'light');
+    $('themeToggle').onclick=()=>applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark', true);
+    let tasks = [];
+    let websiteConfig = {};
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    function renderTasks() { $('empty').hidden = tasks.length > 0; $('tasks').innerHTML = tasks.map((t,i) => { const profile=botProfiles[profileKey(t.bot)]; return `<tr data-i="${i}"><td><input class="check" data-k="enabled" type="checkbox" ${t.enabled ? 'checked' : ''}></td><td><div class="bot-editor"><span class="bot-avatar">${profileAvatar(profile,t.bot)}</span><div class="bot-editor-main"><input data-k="bot" type="text" value="${esc(t.bot)}" placeholder="@bot"><span class="bot-profile-name" data-profile-index="${i}">${esc(profile?.name || '输入用户名后自动获取名称')}</span></div></div></td><td><input data-k="command" type="text" value="${esc(t.command)}" placeholder="/start"></td><td><input data-k="button" type="text" value="${esc(t.button)}" placeholder="可选"></td><td><input data-k="timeout" type="number" min="1" step="1" value="${t.timeout}"></td><td><input data-k="click_wait" type="number" min="0" step="1" value="${t.click_wait ?? 0}"></td><td><input data-k="pause_after" type="number" min="0" step="1" value="${t.pause_after}"></td><td><button class="icon-btn remove" title="删除任务">删除</button></td></tr>`; }).join(''); }
+    async function loadBotProfiles() { const names=[...new Set(tasks.map(t=>t.bot).filter(Boolean))]; if(!names.length) { botProfiles={}; return; } try { const r=await fetch('/api/bot-profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bots:names})}); if(!r.ok) return; const d=await r.json(); botProfiles={...botProfiles,...(d.profiles || {})}; updateProfileDisplays(); renderDashboard(latestStatus); } catch (_) {} }
+    function updateProfileDisplays() { document.querySelectorAll('.bot-profile-name[data-profile-index]').forEach(el => { const task=tasks[Number(el.dataset.profileIndex)]; const profile=botProfiles[profileKey(task?.bot)]; el.textContent=profile?.name || '输入用户名后自动获取名称'; }); document.querySelectorAll('#tasks tr[data-i]').forEach(row => { const task=tasks[Number(row.dataset.i)]; const profile=botProfiles[profileKey(task?.bot)]; const avatar=row.querySelector('.bot-avatar'); if(avatar) avatar.innerHTML=profileAvatar(profile,task?.bot); }); }
+    function scheduleBotProfiles() { clearTimeout(botProfileTimer); botProfileTimer=setTimeout(() => loadBotProfiles(), 450); }
+    function toast(message) { $('toast').textContent = message; $('toast').classList.add('show'); setTimeout(() => $('toast').classList.remove('show'), 2400); }
+    function renderDashboard(s) { const history=Object.fromEntries((s.bot_history||[]).map(x=>[x.bot,x])); const live=Object.fromEntries((s.results||[]).map(x=>[x.bot,x])); const rows=tasks.map(t=>{ const item=live[t.bot] || history[t.bot] || {}; const profile=botProfiles[profileKey(t.bot)]; const status=item.status || (t.enabled ? 'pending' : 'disabled'); const statusLabel=({success:'成功',running:'执行中',failed:'失败',timeout:'超时',pending:'未签到',disabled:'未启用'}[status] || status); const last=item.last_run_at || item.finished_at; const date=last ? new Date(last).toLocaleString() : '—'; const source=item.trigger === 'scheduled' ? '自动' : item.trigger === 'manual' ? '手动' : '—'; const points=formatPoints(item.points); return `<tr><td><div class="bot-summary"><span class="bot-avatar">${profileAvatar(profile,t.bot)}</span><div class="bot-summary-copy"><div class="bot-cell">${esc(profile?.name || t.bot)}</div>${profile?.name ? `<div class="bot-username">${esc(t.bot)}</div>` : ''}</div></div></td><td><span class="status-badge ${esc(status)}">${statusLabel}</span></td><td>${date}</td><td class="points-value">${points}</td><td>${source}</td></tr>`; }).join(''); $('dashboardRows').innerHTML=rows || '<tr><td colspan="5" class="empty">暂无签到任务</td></tr>'; const historyItems=Object.values(history); $('statBots').textContent=tasks.length; $('statSuccess').textContent=historyItems.filter(x=>x.status === 'success').length; $('statFailed').textContent=historyItems.filter(x=>x.status === 'failed' || x.status === 'timeout').length; $('statPoints').textContent=historyItems.reduce((sum,x)=>sum + (Number.isFinite(Number(x.points)) ? Number(x.points) : 0),0); const latest=historyItems.map(x=>x.last_run_at).filter(Boolean).sort().pop(); $('homeUpdated').textContent=latest ? `最近更新 ${new Date(latest).toLocaleString()}` : '等待运行记录'; }
+    function renderSettings(s) { $('apiId').value = s.api_id || ''; $('apiHash').value = ''; $('phone').value = s.phone || ''; $('apiState').textContent = s.api_hash_configured ? 'API Hash 已配置' : 'API Hash 未配置'; $('apiState').className = 'setting-state' + (s.api_hash_configured ? ' ready' : ''); }
+    function readRows() { document.querySelectorAll('#tasks tr').forEach((row,i) => row.querySelectorAll('[data-k]').forEach(el => { const k=el.dataset.k; tasks[i][k] = el.type === 'checkbox' ? el.checked : (el.type === 'number' ? Number(el.value) : el.value.trim()); })); }
+    async function loadTasks() { const r=await fetch('/api/tasks'); const d=await r.json(); if(!r.ok) throw Error(d.detail || '加载失败'); tasks=d.tasks; renderTasks(); renderDashboard(latestStatus); loadBotProfiles(); }
+    async function loadSettings() { const r=await fetch('/api/settings'); const d=await r.json(); if(!r.ok) throw Error(d.detail || 'API 配置加载失败'); renderSettings(d); }
+    function renderWebsiteLoginState(login) { const status=login?.status || 'idle'; const labels={idle:'等待登录',running:'正在获取 Cookie',success:'Cookie 已获取',failed:'登录失败'}; const state=$('websiteLoginSettingState'); state.textContent=labels[status] || status; state.className='website-setting-state'+(status === 'success' ? ' ready' : ''); $('websiteLogin').disabled=status === 'running'; state.title=status === 'failed' ? (login?.message || '') : ''; }
+    function setWebsiteMode(randomCheckin) { $('websiteRandomMode').checked=Boolean(randomCheckin); $('websiteFixedMode').checked=!randomCheckin; $('websiteModeState').textContent=randomCheckin ? '随机签到' : '固定签到'; }
+    function renderWebsiteSettings(s) { websiteConfig={...websiteConfig,...s}; setWebsiteMode(Boolean(s.random_checkin)); $('websiteEnabled').checked=Boolean(s.enabled); $('websiteScheduleEnabled').checked=Boolean(s.schedule_enabled); $('websiteScheduleTime').value=s.schedule_time || '08:00'; const configured=Boolean(s.cookie_configured); $('websiteCookieSettingState').textContent=configured ? 'Cookie 已配置' : 'Cookie 未配置'; $('websiteCookieSettingState').className='website-setting-state'+(configured ? ' ready' : ''); $('websiteSettingState').textContent=s.updated_at ? '已保存' : '未配置'; $('websiteSettingState').className='setting-state'+(s.updated_at ? ' ready' : ''); $('websiteFixedLoginUrl').textContent=s.login_url || 'https://www.nodeseek.com/signIn.html'; $('websiteFixedCheckinUrl').textContent=s.checkin_url || 'https://www.nodeseek.com/api/attendance?random=false'; $('websiteTitle').textContent=s.name || 'NodeSeek 签到'; renderWebsiteLoginState(s.login_runtime); }
+    async function loadWebsiteSettings() { const r=await fetch('/api/website/settings'); const d=await r.json(); if(!r.ok) throw Error(d.detail || '网站设置加载失败'); renderWebsiteSettings(d); }
+    async function saveTasks() { readRows(); const r=await fetch('/api/tasks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tasks})}); const d=await r.json(); if(!r.ok) throw Error(d.detail || '保存失败'); toast('配置已保存'); await loadTasks(); }
+    async function saveWebsiteSettings() { const payload={enabled:$('websiteEnabled').checked,random_checkin:$('websiteRandomMode').checked,schedule_enabled:$('websiteScheduleEnabled').checked,schedule_time:$('websiteScheduleTime').value || '08:00',clear_cookie:false}; const r=await fetch('/api/website/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const d=await r.json(); if(!r.ok) throw Error(d.detail || '签到设置保存失败'); toast('NodeSeek 签到设置已保存'); await Promise.all([loadWebsiteSettings(),loadWebsiteStatus()]); }
+    async function saveWebsiteCookie() { const cookie=$('websiteCookie').value.trim(); if(!cookie) throw Error('请输入 NodeSeek Cookie'); const r=await fetch('/api/website/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookie})}); const d=await r.json(); if(!r.ok) throw Error(d.detail || 'Cookie 保存失败'); $('websiteCookie').value=''; toast('NodeSeek Cookie 已保存'); await Promise.all([loadWebsiteSettings(),loadWebsiteStatus()]); }
+    async function clearWebsiteCookie() { if(!confirm('确定清除已保存的 NodeSeek Cookie 吗？')) return; const r=await fetch('/api/website/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({clear_cookie:true})}); const d=await r.json(); if(!r.ok) throw Error(d.detail || 'Cookie 清除失败'); $('websiteCookie').value=''; toast('NodeSeek Cookie 已清除'); await Promise.all([loadWebsiteSettings(),loadWebsiteStatus()]); }
+    async function loginWebsite() { const username=$('websiteUsername').value.trim(), password=$('websitePassword').value; if(!username || !password) throw Error('请输入 NodeSeek 用户名和密码'); const r=await fetch('/api/website/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})}); const d=await r.json(); $('websitePassword').value=''; if(!r.ok) throw Error(d.detail || 'NodeSeek 登录启动失败'); toast(d.message || 'NodeSeek 登录已开始'); await Promise.all([loadWebsiteSettings(),loadWebsiteStatus()]); }
+    async function saveSettings() { const payload={api_id:$('apiId').value.trim(),api_hash:$('apiHash').value.trim(),phone:$('phone').value.trim()}; const r=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const d=await r.json(); if(!r.ok) throw Error(d.detail || 'API 配置保存失败'); toast('API 配置已保存'); await loadSettings(); }
+    async function run() { readRows(); const r=await fetch('/api/run',{method:'POST'}); const d=await r.json(); if(!r.ok) throw Error(d.detail || '启动失败'); toast('签到已开始'); poll(); }
+    function formatPoints(value) { if(value === null || value === undefined || value === '') return '—'; const n=Number(value); if(!Number.isFinite(n)) return String(value); return `${n > 0 ? '+' : ''}${n}`; }
+    function renderWebsiteStatus(s) { websiteConfig={...websiteConfig,...s}; const runtime=s.runtime || {}, login=s.login_runtime || {}; const last=runtime.running ? runtime : s.last_result; const status=runtime.running ? 'running' : (last?.status || (s.cookie_configured ? 'pending' : 'disabled')); const labels={success:'最近成功',running:'执行中',failed:'最近失败',pending:'等待签到',disabled:'Cookie 未配置'}; const line=$('websiteStatusLine'), dot=line.querySelector('.dot'); dot.className='dot '+(runtime.running ? 'running' : ''); $('websiteStatusLabel').textContent=labels[status] || status; $('websiteTitle').textContent=s.name || 'NodeSeek 签到'; $('websiteConfigState').textContent=s.enabled ? 'NodeSeek 签到已启用' : 'NodeSeek 签到未启用'; $('websiteConfigDetail').textContent=!s.cookie_configured ? '请先在网站设置中通过账号密码获取 Cookie。' : s.enabled ? '可以手动执行；如开启自动签到，将按设定时间执行。' : '请在网站设置中启用后执行签到。'; $('websiteCookieState').textContent=s.cookie_configured ? 'Cookie 已配置' : 'Cookie 未配置'; $('websiteCookieState').className=s.cookie_configured ? 'website-setting-state ready' : 'website-setting-state'; const loginLabels={idle:'未执行',running:'正在登录',success:'Cookie 已获取',failed:'登录失败'}; $('websiteLoginState').textContent=`登录状态：${loginLabels[login.status] || login.status}`; $('websiteLoginDetail').textContent=login.message || '账号密码仅用于获取 Cookie，不会保存。'; const schedule=s.schedule || {}; const next=schedule.next_run_at ? new Date(schedule.next_run_at).toLocaleString() : '待安排'; $('websiteScheduleMeta').textContent=schedule.enabled ? `自动签到：每天 ${schedule.time || '08:00'}（${schedule.timezone || 'Asia/Shanghai'}）执行 · 下一次 ${next}` : '自动签到：未启用'; const state=$('websiteLastState'); state.textContent=last?.status === 'success' ? '成功' : last?.status === 'failed' ? '失败' : '暂无记录'; state.className='setting-state'+(last?.status === 'success' ? ' ready' : ''); $('websiteResultMeta').textContent=last?.finished_at ? `完成于 ${new Date(last.finished_at).toLocaleString()}${last.status_code ? ` · HTTP ${last.status_code}` : ''}${last.trigger === 'scheduled' ? ' · 自动' : ' · 手动'}` : '尚未执行'; const resultMessage=$('websiteResultMessage'); resultMessage.textContent=last?.message || '暂无 NodeSeek 签到记录'; resultMessage.className='website-result-message'+(last?.status === 'success' ? ' success' : last?.status === 'failed' ? ' failed' : ''); $('websiteResponse').textContent=last?.response_preview || '暂无响应内容'; $('runWebsite').disabled=Boolean(runtime.running) || !s.enabled || !s.cookie_configured; $('openWebsite').disabled=!s.login_url; const settingLoginState=$('websiteLoginSettingState'); if(settingLoginState) renderWebsiteLoginState(login); }
+    async function loadWebsiteStatus() { const r=await fetch('/api/website/status'); const d=await r.json(); if(!r.ok) throw Error(d.detail || '网站签到状态加载失败'); renderWebsiteStatus(d); }
+    function openWebsite() { const url=websiteConfig.login_url || 'https://www.nodeseek.com/signIn.html'; window.open(url,'_blank','noopener,noreferrer'); }
+    async function runWebsite() { const r=await fetch('/api/website/run',{method:'POST'}); const d=await r.json(); if(!r.ok) throw Error(d.detail || '网站签到启动失败'); toast(d.message || '网站签到已开始'); loadWebsiteStatus().catch(e=>toast(e.message)); }
+    function renderProxyStatus(s) { const kernel=$('proxyKernelStatus'), dot=kernel.querySelector('.proxy-dot'); dot.className='proxy-dot '+(s.mihomo?.running ? 'ready' : 'warn'); kernel.querySelector('strong').textContent=s.mihomo?.running ? `Mihomo ${s.mihomo.version || '在线'}` : 'Mihomo 未连接'; $('proxySubscriptionState').textContent=s.configured ? `已配置 · ${s.name || 'Telegram 订阅'}` : '未配置'; $('proxyPreview').textContent=s.configured ? `已保存：${s.url_preview || '订阅地址'}，完整链接不会在页面回显。` : '订阅地址不会完整显示，导入后只保留在服务器配置中。'; $('proxyEnabled').checked=Boolean(s.enabled); $('proxySelected').textContent=s.selected || 'DIRECT'; $('proxyNodeMeta').textContent=`${(s.nodes || []).length} 个节点`; $('proxyMessage').textContent=s.error || ''; const rows=(s.nodes || []).map(node=>{ const alive=node.name === 'DIRECT' || node.alive === true; const delay=node.name === 'DIRECT' ? '直连' : (node.delay ? `${node.delay} ms` : '—'); const selected=node.name === s.selected; const status=node.name === 'DIRECT' ? '可用' : alive ? '在线' : '探测失败'; const title=!alive && node.name !== 'DIRECT' ? '该节点最近一次连通性探测失败，通常是节点服务或网络不可达，并非 AnyTLS 协议不支持。' : ''; return `<tr><td><div class="node-name">${esc(node.name)}</div></td><td><div class="node-type">${esc(node.type || '未知')}</div></td><td><span class="node-state ${alive ? 'alive' : 'dead'}" title="${esc(title)}">${status}</span></td><td>${delay}</td><td>${selected ? '<span class="node-selected">当前使用</span>' : `<button class="proxy-select" data-node="${esc(node.name)}">选择</button>`}</td></tr>`; }).join(''); $('proxyNodes').innerHTML=rows || '<tr><td colspan="5" class="empty">暂无节点，请先导入订阅或刷新节点</td></tr>'; }
+    async function loadProxyStatus() { const r=await fetch('/api/proxy/status'); const d=await r.json(); if(!r.ok) throw Error(d.detail || '代理状态加载失败'); renderProxyStatus(d); }
+    async function importProxySubscription() { const url=$('proxyUrl').value.trim(); const name=$('proxyName').value.trim() || 'Telegram 订阅'; const r=await fetch('/api/proxy/subscription',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,name,enabled:true})}); const d=await r.json(); if(!r.ok) throw Error(d.detail || '订阅导入失败'); $('proxyUrl').value=''; toast(d.message || '订阅已导入'); await loadProxyStatus(); }
+    async function refreshProxyNodes() { const r=await fetch('/api/proxy/refresh',{method:'POST'}); const d=await r.json(); if(!r.ok) throw Error(d.detail || '节点刷新失败'); toast(d.message || '节点刷新已触发'); setTimeout(() => loadProxyStatus().catch(e=>toast(e.message)), 1200); }
+    async function removeProxySubscription() { if(!confirm('确定清除当前订阅吗？')) return; const r=await fetch('/api/proxy/subscription',{method:'DELETE'}); const d=await r.json(); if(!r.ok) throw Error(d.detail || '清除订阅失败'); toast('订阅已清除'); await loadProxyStatus(); }
+    async function toggleProxy() { const r=await fetch('/api/proxy/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('proxyEnabled').checked})}); const d=await r.json(); if(!r.ok) { $('proxyEnabled').checked=!$('proxyEnabled').checked; throw Error(d.detail || '代理设置保存失败'); } toast(d.enabled ? 'Telegram 代理已启用' : 'Telegram 代理已停用'); }
+    async function selectProxyNode(name) { const r=await fetch('/api/proxy/select',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}); const d=await r.json(); if(!r.ok) throw Error(d.detail || '节点切换失败'); toast(`已切换到 ${name}`); await loadProxyStatus(); }
+    let latestStatus = {};
+    function renderStatus(s) { latestStatus=s; renderDashboard(s); const line=$('statusLine'), dot=line.querySelector('.dot'), label=line.querySelector('span:last-child'); dot.className='dot '+(s.running?'running':''); label.textContent=s.running ? `运行中 · ${s.current || '准备中'}` : (s.finished_at ? '已完成' : '空闲'); $('meta').textContent=s.started_at ? `开始 ${new Date(s.started_at).toLocaleString()}${s.finished_at ? ` · 结束 ${new Date(s.finished_at).toLocaleString()}` : ''}` : '尚未运行'; const schedule=s.schedule||{}; const next=schedule.next_run_at ? new Date(schedule.next_run_at).toLocaleString() : '待安排'; $('scheduleMeta').textContent=`自动签到：每天 ${schedule.window || '00:00-00:20'}（${schedule.timezone || 'Asia/Shanghai'}）随机执行 · 下一次 ${next}`; const rs=s.results||[]; $('results').innerHTML=rs.length ? rs.map(x=>`<div class="result"><div class="result-main"><div class="result-bot">${esc(x.bot)}</div><div class="result-msg">${esc(x.message || '')}${x.points !== null && x.points !== undefined ? ` · ${formatPoints(x.points)} 积分` : ''}</div></div><span class="pill ${x.status}">${({success:'成功',running:'执行中',failed:'失败',timeout:'超时'}[x.status]||x.status)}</span></div>`).join('') : '<div class="empty">暂无签到记录</div>'; const logs=s.logs||[]; $('logs').textContent=logs.length ? logs.map(x=>`[${new Date(x.time).toLocaleTimeString()}] ${x.message}`).join('\n') : '暂无日志'; $('run').disabled=s.running; $('homeRun').disabled=s.running; const authRequired=s.auth_required === 'code' || s.auth_required === 'password'; $('authPanel').hidden=!authRequired; if(authRequired) { $('authMessage').textContent=s.auth_message || '请输入登录信息'; $('authValue').type=s.auth_required === 'password' ? 'password' : 'text'; $('authValue').autocomplete=s.auth_required === 'password' ? 'current-password' : 'one-time-code'; $('authValue').placeholder=s.auth_required === 'password' ? '请输入 2FA 密码' : '请输入验证码'; } $('authSubmit').disabled=!authRequired; }
+    async function poll() { try { const r=await fetch('/api/status'); renderStatus(await r.json()); } catch(e) { toast(e.message); } try { await loadWebsiteStatus(); } catch(e) { toast(e.message); } }
+    async function submitAuth() { const value=$('authValue').value; const r=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value})}); const d=await r.json(); if(!r.ok) throw Error(d.detail || '登录信息提交失败'); $('authValue').value=''; toast('已提交'); await poll(); }
+    $('add').onclick=()=>{ tasks.push({bot:'',command:'/start',button:'',timeout:30,click_wait:0,pause_after:2,enabled:true}); renderTasks(); };
+    $('tasks').onclick=(e)=>{ if(e.target.classList.contains('remove')) { tasks.splice(Number(e.target.closest('tr').dataset.i),1); renderTasks(); scheduleBotProfiles(); } };
+    $('tasks').oninput=(e)=>{ if(e.target.dataset.k === 'bot') { const row=e.target.closest('tr'); tasks[Number(row.dataset.i)].bot=e.target.value.trim(); updateProfileDisplays(); scheduleBotProfiles(); } };
+    let consoleExpanded = false;
+    function setConsoleExpanded(expanded) { consoleExpanded=expanded; $('consoleSubmenu').hidden=!expanded; $('consoleNav').setAttribute('aria-expanded', String(expanded)); $('consoleNav').classList.toggle('expanded', expanded); }
+    function selectNav(name) { const consoleViews=['tasks','website','website-settings','settings']; const inConsole=consoleViews.includes(name); const isConsole=name === 'console'; const isLogs=name === 'logs'; const viewName=isConsole ? 'tasks' : (inConsole || isLogs ? name : 'logs'); if(name === 'home' || name === 'subscription' || isLogs) setConsoleExpanded(false); else setConsoleExpanded(true); document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.dataset.nav === name || ((inConsole || isConsole) && el.dataset.nav === 'console'))); const isHome=name === 'home'; const isSubscription=name === 'subscription'; $('homeView').hidden=!isHome; $('subscriptionView').hidden=!isSubscription; $('consoleView').hidden=!(inConsole || isLogs || isConsole); if(inConsole || isLogs || isConsole) { [['tasks','consoleTasksView'],['website','consoleWebsiteView'],['website-settings','consoleWebsiteSettingsView'],['logs','consoleLogsView'],['settings','consoleSettingsView']].forEach(([key,id]) => { $(id).hidden=key !== viewName; }); if(viewName === 'settings') loadSettings().catch(e=>toast(e.message)); if(viewName === 'website-settings') loadWebsiteSettings().catch(e=>toast(e.message)); if(viewName === 'website') loadWebsiteStatus().catch(e=>toast(e.message)); window.scrollTo({top:0, behavior:'smooth'}); } else if(isSubscription) { loadProxyStatus().catch(e=>toast(e.message)); window.scrollTo({top:0, behavior:'smooth'}); } else { window.scrollTo({top:0, behavior:'smooth'}); } }
+    document.querySelector('[data-nav="home"]').onclick=()=>selectNav('home');
+    $('consoleNav').onclick=()=>{ if($('consoleView').hidden) selectNav('console'); else setConsoleExpanded(!consoleExpanded); };
+    document.querySelector('[data-nav="tasks"]').onclick=()=>selectNav('tasks');
+    document.querySelector('[data-nav="logs"]').onclick=()=>selectNav('logs');
+    document.querySelector('[data-nav="settings"]').onclick=()=>selectNav('settings');
+    document.querySelector('[data-nav="website"]').onclick=()=>selectNav('website');
+    document.querySelector('[data-nav="website-settings"]').onclick=()=>selectNav('website-settings');
+    document.querySelector('[data-nav="subscription"]').onclick=()=>selectNav('subscription');
+    $('proxyImport').onclick=()=>importProxySubscription().catch(e=>toast(e.message)); $('proxyRefresh').onclick=()=>refreshProxyNodes().catch(e=>toast(e.message)); $('proxyRemove').onclick=()=>removeProxySubscription().catch(e=>toast(e.message)); $('proxyEnabled').onchange=()=>toggleProxy().catch(e=>toast(e.message)); $('proxyNodes').onclick=e=>{ const button=e.target.closest('.proxy-select'); if(button) selectProxyNode(button.dataset.node).catch(err=>toast(err.message)); };
+    $('openWebsite').onclick=openWebsite; $('runWebsite').onclick=()=>runWebsite().catch(e=>toast(e.message)); $('websiteLogin').onclick=()=>loginWebsite().catch(e=>toast(e.message)); $('websiteFixedMode').onchange=()=>setWebsiteMode(false); $('websiteRandomMode').onchange=()=>setWebsiteMode(true); $('saveWebsiteCookie').onclick=()=>saveWebsiteCookie().catch(e=>toast(e.message)); $('clearWebsiteCookie').onclick=()=>clearWebsiteCookie().catch(e=>toast(e.message)); $('saveWebsiteSettings').onclick=()=>saveWebsiteSettings().catch(e=>toast(e.message)); $('websitePassword').onkeydown=(e)=>{ if(e.key==='Enter') loginWebsite().catch(err=>toast(err.message)); }; $('websiteCookie').onkeydown=(e)=>{ if(e.key==='Enter') saveWebsiteCookie().catch(err=>toast(err.message)); };
+    $('reload').onclick=()=>loadTasks().catch(e=>toast(e.message)); $('refreshLogs').onclick=()=>poll().catch(e=>toast(e.message)); $('save').onclick=()=>saveTasks().catch(e=>toast(e.message)); $('saveSettings').onclick=()=>saveSettings().catch(e=>toast(e.message)); $('run').onclick=()=>run().catch(e=>toast(e.message)); $('homeRun').onclick=()=>run().catch(e=>toast(e.message)); $('authSubmit').onclick=()=>submitAuth().catch(e=>toast(e.message)); $('authValue').onkeydown=(e)=>{ if(e.key==='Enter') submitAuth().catch(err=>toast(err.message)); };
+    Promise.all([loadTasks(),loadSettings(),loadWebsiteSettings(),loadWebsiteStatus()]).catch(e=>toast(e.message)); poll(); setInterval(poll, 2000);
+  </script>
+</body>
+</html>

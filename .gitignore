@@ -1,0 +1,9 @@
+.env
+.test-server.md
+.venv/
+*.session
+*.session-journal
+settings.json
+data/
+__pycache__/
+*.py[cod]
