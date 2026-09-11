@@ -10,18 +10,18 @@ Telegram 签到 Web 控制台。Docker 镜像由 GitHub Actions 自动构建并�
 
 ### 2. 获取项目并配置
 
-
+```bash
 git clone https://github.com/Bibibiibi/tgauto.git
 cd tgauto
 cp .env.example .env
 mkdir -p data
-
+```
 
 ### 3. 启动服务
 
-
+```bash
 docker compose up -d
-
+```
 
 浏览器访问 `http://服务器IP:8080`。
 
