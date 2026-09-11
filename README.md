@@ -10,24 +10,18 @@ Telegram 签到 Web 控制台。Docker 镜像由 GitHub Actions 自动构建并�
 
 ### 2. 获取项目并配置
 
-```bash
+
 git clone https://github.com/Bibibiibi/tgauto.git
 cd tgauto
 cp .env.example .env
 mkdir -p data
-```
 
-编辑 `.env`，至少填写 Telegram 的 `TG_API_ID` 和 `TG_API_HASH`。凭据从 [my.telegram.org](https://my.telegram.org) 的 **API development tools** 获取。
-
-如需为管理页面启用登录保护，同时设置 `WEB_ADMIN_USER` 和 `WEB_ADMIN_PASSWORD`。
-
-如需通过文件配置签到任务，先执行 `cp bots.json data/bots.json` 后再编辑；也可以启动后在 Web 控制台中配置。
 
 ### 3. 启动服务
 
-```bash
+
 docker compose up -d
-```
+
 
 浏览器访问 `http://服务器IP:8080`。
 
